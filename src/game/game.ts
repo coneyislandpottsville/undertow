@@ -3,7 +3,7 @@ import { RideAudio } from "./audio";
 import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
-import { createSprayMaterial } from "./materials";
+import { createSprayMaterial, createWakeMaterial } from "./materials";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
@@ -36,7 +36,14 @@ const QUAD_DRAG = 0.0085;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;
-const WHIRL_TIME = 5.1;
+/** Whirlpool: seconds to die down when ridden wide; leaning in shortens it. */
+const WHIRL_TIME = 7;
+/** Tightest spiral radius, m. */
+const WHIRL_INNER = 3.2;
+/** Radial speed a full lean buys against the drain, m/s. */
+const WHIRL_LEAN = 3.2;
+const WAKE_COUNT = 24;
+const WAKE_LIFE = 1.6;
 
 function makeFrame() {
   return {
@@ -111,10 +118,15 @@ export class Game {
   private press = GRAVITY;
   private yaw = 0;
   private drop = 1;
-  private whirlT = 0;
   private whirlAngle = 0;
-  private whirlRadius = 8;
+  private whirlR = 8;
+  /** 1 at the splash, 0 when the vortex has died; drains faster the tighter you ride. */
+  private whirlEnergy = 0;
   private swirl = 0;
+  private readonly wake: THREE.Mesh[] = [];
+  private readonly wakeAge = new Float32Array(WAKE_COUNT).fill(-1);
+  private wakeNext = 0;
+  private wakeTimer = 0;
   private px = 0;
   private py = 0;
   private pz = 0;
@@ -198,6 +210,16 @@ export class Game {
     this.spray.frustumCulled = false;
     this.scene.add(this.spray);
 
+    const wakeGeo = new THREE.PlaneGeometry(1.4, 1.4);
+    for (let i = 0; i < WAKE_COUNT; i++) {
+      const quad = new THREE.Mesh(wakeGeo, createWakeMaterial());
+      quad.rotation.x = -Math.PI / 2;
+      quad.visible = false;
+      quad.frustumCulled = false;
+      this.scene.add(quad);
+      this.wake.push(quad);
+    }
+
     const pose = startPose();
     this.current = generateSection(this.worldSeed, pose.position, pose.dir, 0, true);
     this.scene.add(this.current.group);
@@ -225,6 +247,7 @@ export class Game {
       getBank: () => this.bank,
       getLift: () => this.lift,
       getPress: () => this.press,
+      getWhirl: () => ({ energy: this.whirlEnergy, r: this.whirlR }),
       getPosition: () => [this.px, this.py, this.pz],
       getSeed: () => this.worldSeed.toString(16),
       release: () => this.focus(),
@@ -260,6 +283,7 @@ export class Game {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
+    for (const quad of this.wake) (quad.material as THREE.Material).dispose();
     this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
   }
@@ -432,12 +456,12 @@ export class Game {
 
   private enterWhirl() {
     this.mode = "whirl";
-    this.whirlT = 0;
     const pool = this.current.pool;
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
     this.whirlAngle = Math.atan2(dx, dz);
-    this.whirlRadius = Math.max(4.5, Math.hypot(dx, dz));
+    this.whirlR = THREE.MathUtils.clamp(Math.hypot(dx, dz), 4.5, pool.radius - 2.4);
+    this.whirlEnergy = 1;
     this.bank = 0;
     this.bankVel = 0;
     this.lift = 0;
@@ -447,52 +471,69 @@ export class Game {
     this.whirlWall = performance.now();
     useHud.getState().patch({
       mode: "whirl",
-      hint: "Whirlpool — hold on",
+      hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
       exits: this.current.exits.length,
     });
   }
 
+  /**
+   * The vortex carries the rider around the pool and drains toward the middle
+   * as it dies. The pool centre is on the rider's left, so A (lean left) pulls
+   * in: a tighter, faster spiral that burns the vortex out sooner. D leans out
+   * to ride it wide and slow, and once it has weakened you can bail at the rim.
+   * A wall-clock cap guarantees the whirlpool always ends.
+   */
   private updateWhirl(dt: number) {
-    this.whirlT += dt;
-    const simU = THREE.MathUtils.clamp(this.whirlT / WHIRL_TIME, 0, 1);
-    const wallU = THREE.MathUtils.clamp((performance.now() - this.whirlWall) / (WHIRL_TIME * 1000), 0, 1);
-    const u = Math.max(simU, wallU);
-    const spin = THREE.MathUtils.lerp(2.35, 0.18, u * u);
-    this.whirlAngle += spin * dt;
-    const inner = 3.6;
-    const startR = this.whirlRadius;
-    const dip = u < 0.55 ? u / 0.55 : 1 - (u - 0.55) / 0.45;
-    const r = THREE.MathUtils.lerp(startR, inner, Math.sin(dip * Math.PI * 0.5) * 0.78);
     const pool = this.current.pool;
-    this.px = pool.center.x + Math.sin(this.whirlAngle) * r;
-    this.pz = pool.center.z + Math.cos(this.whirlAngle) * r;
+    const steer = this.input.getSteer();
+    const outerR = pool.radius - 2.4;
+    const tight = THREE.MathUtils.clamp((outerR - this.whirlR) / (outerR - WHIRL_INNER), 0, 1);
+    this.whirlEnergy -= (dt / WHIRL_TIME) * (1 + tight * 1.5);
+    if (performance.now() - this.whirlWall > 11000) this.whirlEnergy = -1;
+    const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
+
+    const drainR = THREE.MathUtils.lerp(outerR * 0.55, WHIRL_INNER, 1 - e);
+    const pull = THREE.MathUtils.clamp((drainR - this.whirlR) * 0.9, -1.4, 1.4);
+    this.whirlR = THREE.MathUtils.clamp(this.whirlR + (pull - steer * WHIRL_LEAN) * dt, WHIRL_INNER, outerR);
+
+    const spin = (1.9 + tight * 1.7) * (0.3 + 0.7 * e);
+    this.whirlAngle += spin * dt;
+    this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
+    this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
     this.py = pool.waterY + 0.55;
     this.eye.set(this.px, this.py + 0.62, this.pz);
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
-    this.speed = THREE.MathUtils.lerp(this.speed, 6, 1 - Math.exp(-1.2 * dt));
+    this.speed = spin * this.whirlR;
+    if (tight > 0.7 && e > 0.4) this.trauma = Math.max(this.trauma, 0.1 + tight * 0.15);
+
     this.current.whirl.rotation.z = -this.whirlAngle;
     const whirlMat = this.current.whirl.material as THREE.MeshBasicMaterial;
-    whirlMat.opacity = 0.4 + (1 - u) * 0.55;
-    this.current.whirl.scale.setScalar(THREE.MathUtils.lerp(1.05, 0.62, Math.sin(u * Math.PI) * 0.5));
+    whirlMat.opacity = 0.25 + e * 0.7;
+    this.current.whirl.scale.setScalar(THREE.MathUtils.lerp(0.62, 1.05, e));
 
-    if (u >= 1) {
-      this.mode = "paddle";
-      this.swirl = 3.2;
-      whirlMat.opacity = 0.22;
-      this.current.whirl.scale.setScalar(0.85);
-      useHud.getState().patch({
-        mode: "paddle",
-        hint: "Paddle to a glowing exit · W/S move · A/D turn",
-        exits: this.current.exits.length,
-      });
-    }
+    // Once the vortex has weakened, a rider at the rim can paddle out of it early.
+    const bail = e < 0.5 && this.input.getThrottle() > 0.5 && this.whirlR > outerR - 1.0;
+    if (this.whirlEnergy <= 0 || bail) this.enterPaddle(spin);
+  }
+
+  private enterPaddle(spin: number) {
+    this.mode = "paddle";
+    this.swirl = 1.2 + spin * 0.9;
+    this.speed = THREE.MathUtils.clamp(this.speed * 0.5, 2, 6);
+    const whirlMat = this.current.whirl.material as THREE.MeshBasicMaterial;
+    whirlMat.opacity = Math.min(whirlMat.opacity, 0.22);
+    useHud.getState().patch({
+      mode: "paddle",
+      hint: "Paddle to a glowing exit · W/S move · A/D turn",
+      exits: this.current.exits.length,
+    });
   }
 
   private updatePaddle(dt: number) {
     const steer = this.input.getSteer();
     const throttle = this.input.getThrottle();
-    const speedFactor = THREE.MathUtils.clamp(0.28 + Math.abs(this.speed) / 7, 0.28, 1.15);
+    const speedFactor = THREE.MathUtils.clamp(0.5 + Math.abs(this.speed) / 7, 0.5, 1.15);
     const reverse = this.speed >= 0 ? 1 : -1;
     this.yaw += steer * POOL_TURN * speedFactor * reverse * dt;
     this.heading = this.yaw;
@@ -512,11 +553,19 @@ export class Game {
 
     const pool = this.current.pool;
     this.py = pool.waterY + 0.55;
+    const near = this.nearestExit();
+    if (near) {
+      // Gentle surface current from the middle of the pool out toward the nearest mouth.
+      const cx = near.position.x - pool.center.x;
+      const cz = near.position.z - pool.center.z;
+      const cl = Math.hypot(cx, cz) || 1;
+      this.px += (cx / cl) * 0.45 * dt;
+      this.pz += (cz / cl) * 0.45 * dt;
+    }
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
     const r = Math.hypot(dx, dz);
     const maxR = pool.radius - 1.25;
-    const near = this.nearestExit();
     const toExit = near ? Math.hypot(this.px - near.position.x, this.pz - near.position.z) : 99;
     if (near && toExit < 6.8) {
       const dirx = (near.position.x - this.px) / toExit;
@@ -641,7 +690,9 @@ export class Game {
     this.applyFov();
     this.updateCamera(dt);
     this.cavern.position.copy(this.camera.position);
+    this.current.tick(dt, this.clock.elapsed);
     this.updateSpray(dt);
+    this.updateWake(dt);
     this.audio.update(this.speed, this.mode);
 
     this.hudTick += dt;
@@ -730,6 +781,40 @@ export class Game {
     this.camera.position.y += bob;
   }
 
+  /** Soft ripples dropped behind the floatie while it moves across the pool. */
+  private updateWake(dt: number) {
+    const moving = this.mode === "paddle" && Math.abs(this.speed) > 1.2;
+    this.wakeTimer -= dt;
+    if (moving && this.wakeTimer <= 0) {
+      this.wakeTimer = 0.11;
+      const i = this.wakeNext;
+      this.wakeNext = (i + 1) % WAKE_COUNT;
+      const quad = this.wake[i]!;
+      const back = this.speed >= 0 ? 0.6 : -0.6;
+      quad.position.set(
+        this.px + Math.sin(this.yaw) * back,
+        this.current.pool.waterY + 0.05,
+        this.pz + Math.cos(this.yaw) * back,
+      );
+      quad.visible = true;
+      this.wakeAge[i] = 0;
+    }
+    for (let i = 0; i < WAKE_COUNT; i++) {
+      const age = this.wakeAge[i]!;
+      if (age < 0) continue;
+      const quad = this.wake[i]!;
+      if (age + dt > WAKE_LIFE) {
+        this.wakeAge[i] = -1;
+        quad.visible = false;
+        continue;
+      }
+      this.wakeAge[i] = age + dt;
+      const u = (age + dt) / WAKE_LIFE;
+      quad.scale.setScalar(1 + u * 1.8);
+      (quad.material as THREE.MeshBasicMaterial).opacity = 0.34 * (1 - u) * (1 - u);
+    }
+  }
+
   private updateSpray(dt: number) {
     const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
     const arr = positions.array as Float32Array;
@@ -803,6 +888,7 @@ declare global {
       getBank?: () => number;
       getLift?: () => number;
       getPress?: () => number;
+      getWhirl?: () => { energy: number; r: number };
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
       release?: () => void;
