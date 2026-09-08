@@ -10,33 +10,115 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LabIndexRouteImport } from './routes/lab/index'
+import { Route as LabFilmRouteImport } from './routes/lab/film'
+import { Route as LabPoolRouteImport } from './routes/lab/pool'
+import { Route as LabPostRouteImport } from './routes/lab/post'
+import { Route as LabSprayRouteImport } from './routes/lab/spray'
+import { Route as LabWhirlpoolRouteImport } from './routes/lab/whirlpool'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LabIndexRoute = LabIndexRouteImport.update({
+  id: '/lab/',
+  path: '/lab/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabFilmRoute = LabFilmRouteImport.update({
+  id: '/lab/film',
+  path: '/lab/film',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabPoolRoute = LabPoolRouteImport.update({
+  id: '/lab/pool',
+  path: '/lab/pool',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabPostRoute = LabPostRouteImport.update({
+  id: '/lab/post',
+  path: '/lab/post',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabSprayRoute = LabSprayRouteImport.update({
+  id: '/lab/spray',
+  path: '/lab/spray',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LabWhirlpoolRoute = LabWhirlpoolRouteImport.update({
+  id: '/lab/whirlpool',
+  path: '/lab/whirlpool',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/lab/film': typeof LabFilmRoute
+  '/lab/pool': typeof LabPoolRoute
+  '/lab/post': typeof LabPostRoute
+  '/lab/spray': typeof LabSprayRoute
+  '/lab/whirlpool': typeof LabWhirlpoolRoute
+  '/lab/': typeof LabIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/lab/film': typeof LabFilmRoute
+  '/lab/pool': typeof LabPoolRoute
+  '/lab/post': typeof LabPostRoute
+  '/lab/spray': typeof LabSprayRoute
+  '/lab/whirlpool': typeof LabWhirlpoolRoute
+  '/lab': typeof LabIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/lab/film': typeof LabFilmRoute
+  '/lab/pool': typeof LabPoolRoute
+  '/lab/post': typeof LabPostRoute
+  '/lab/spray': typeof LabSprayRoute
+  '/lab/whirlpool': typeof LabWhirlpoolRoute
+  '/lab/': typeof LabIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/lab/film'
+    | '/lab/pool'
+    | '/lab/post'
+    | '/lab/spray'
+    | '/lab/whirlpool'
+    | '/lab/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/lab/film'
+    | '/lab/pool'
+    | '/lab/post'
+    | '/lab/spray'
+    | '/lab/whirlpool'
+    | '/lab'
+  id:
+    | '__root__'
+    | '/'
+    | '/lab/film'
+    | '/lab/pool'
+    | '/lab/post'
+    | '/lab/spray'
+    | '/lab/whirlpool'
+    | '/lab/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LabFilmRoute: typeof LabFilmRoute
+  LabPoolRoute: typeof LabPoolRoute
+  LabPostRoute: typeof LabPostRoute
+  LabSprayRoute: typeof LabSprayRoute
+  LabWhirlpoolRoute: typeof LabWhirlpoolRoute
+  LabIndexRoute: typeof LabIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +130,59 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lab/': {
+      id: '/lab/'
+      path: '/lab'
+      fullPath: '/lab/'
+      preLoaderRoute: typeof LabIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/film': {
+      id: '/lab/film'
+      path: '/lab/film'
+      fullPath: '/lab/film'
+      preLoaderRoute: typeof LabFilmRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/pool': {
+      id: '/lab/pool'
+      path: '/lab/pool'
+      fullPath: '/lab/pool'
+      preLoaderRoute: typeof LabPoolRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/post': {
+      id: '/lab/post'
+      path: '/lab/post'
+      fullPath: '/lab/post'
+      preLoaderRoute: typeof LabPostRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/spray': {
+      id: '/lab/spray'
+      path: '/lab/spray'
+      fullPath: '/lab/spray'
+      preLoaderRoute: typeof LabSprayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lab/whirlpool': {
+      id: '/lab/whirlpool'
+      path: '/lab/whirlpool'
+      fullPath: '/lab/whirlpool'
+      preLoaderRoute: typeof LabWhirlpoolRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LabFilmRoute: LabFilmRoute,
+  LabPoolRoute: LabPoolRoute,
+  LabPostRoute: LabPostRoute,
+  LabSprayRoute: LabSprayRoute,
+  LabWhirlpoolRoute: LabWhirlpoolRoute,
+  LabIndexRoute: LabIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
