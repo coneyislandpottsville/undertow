@@ -1,8 +1,32 @@
-/** Procedural water-rush bed. Unlocks on the first user gesture. */
+/**
+ * Procedural ride audio built from filtered noise, so it ships with no assets.
+ * Unlocks on the first user gesture. Layers: a speed-driven water rush (rumble
+ * plus hiss), a whirlpool roar with a spin-rate wobble, and one-shot splash,
+ * paddle-stroke and exit-whoosh bursts.
+ */
+type Mode = "slide" | "whirl" | "paddle";
+
+type Layer = { filter: BiquadFilterNode; gain: GainNode };
+
+type OneShot = {
+  type: BiquadFilterType;
+  from: number;
+  to: number;
+  q: number;
+  peak: number;
+  attack: number;
+  decay: number;
+};
+
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+
 export class RideAudio {
   private ctx: AudioContext | null = null;
-  private gain: GainNode | null = null;
-  private filter: BiquadFilterNode | null = null;
+  private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private rumble: Layer | null = null;
+  private hiss: Layer | null = null;
+  private roar: (Layer & { lfo: OscillatorNode; depth: GainNode }) | null = null;
 
   unlock() {
     if (!this.ctx) this.build();
@@ -11,45 +35,118 @@ export class RideAudio {
 
   private build() {
     const ctx = new AudioContext();
-    const samples = Math.floor(ctx.sampleRate * 1.6);
+    const samples = Math.floor(ctx.sampleRate * 2);
     const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < samples; i++) data[i] = Math.random() * 2 - 1;
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-    noise.loop = true;
-    const filter = ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.Q.value = 0.7;
-    filter.frequency.value = 420;
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    noise.start();
+    this.noise = buffer;
+    const master = ctx.createGain();
+    master.gain.value = 0.55;
+    master.connect(ctx.destination);
     this.ctx = ctx;
-    this.gain = gain;
-    this.filter = filter;
+    this.master = master;
+    this.rumble = this.layer("lowpass", 220, 0.8);
+    this.hiss = this.layer("bandpass", 1400, 0.6);
+    const roar = this.layer("lowpass", 160, 1.1);
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 1.5;
+    const depth = ctx.createGain();
+    depth.gain.value = 0;
+    lfo.connect(depth);
+    depth.connect(roar.gain.gain);
+    lfo.start();
+    this.roar = { ...roar, lfo, depth };
   }
 
-  update(speed: number, mode: "slide" | "whirl" | "paddle") {
-    if (!this.ctx || !this.gain || !this.filter) return;
-    const n =
-      mode === "paddle" ? THREE_CLAMP(speed / 9, 0, 1) : THREE_CLAMP(speed / 44, 0, 1);
-    const target = mode === "whirl" ? 0.07 + n * 0.08 : 0.018 + n * n * 0.2;
-    const freq = mode === "whirl" ? 180 + n * 900 : 280 + n * 1900;
+  /** A looping noise source through a filter and a gain, silent until driven. */
+  private layer(type: BiquadFilterType, freq: number, q: number): Layer {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master!);
+    src.start();
+    return { filter, gain };
+  }
+
+  /** Continuous bed. `spin` is the whirlpool's angular rate in rad/s, else 0. */
+  update(speed: number, mode: Mode, spin = 0) {
+    if (!this.ctx || !this.rumble || !this.hiss || !this.roar) return;
     const t = this.ctx.currentTime;
-    this.gain.gain.setTargetAtTime(target, t, 0.08);
-    this.filter.frequency.setTargetAtTime(freq, t, 0.12);
+    const v = clamp(Math.abs(speed) / 44, 0, 1);
+    const p = clamp(Math.abs(speed) / 9, 0, 1);
+    const sliding = mode === "slide";
+    const paddling = mode === "paddle";
+    const rumbleGain = sliding ? 0.05 + v * 0.35 : paddling ? 0.02 + p * 0.06 : 0.04;
+    const hissGain = sliding ? v * v * 0.28 : paddling ? p * 0.05 : 0.02;
+    this.rumble.gain.gain.setTargetAtTime(rumbleGain, t, 0.08);
+    this.rumble.filter.frequency.setTargetAtTime(160 + v * 340, t, 0.1);
+    this.hiss.gain.gain.setTargetAtTime(hissGain, t, 0.08);
+    this.hiss.filter.frequency.setTargetAtTime(900 + v * 2600, t, 0.12);
+    const whirl = mode === "whirl";
+    const s = clamp(spin / 3.6, 0, 1);
+    const roarGain = whirl ? 0.12 + s * 0.18 : 0;
+    this.roar.gain.gain.setTargetAtTime(roarGain, t, 0.15);
+    this.roar.depth.gain.setTargetAtTime(whirl ? roarGain * 0.6 : 0, t, 0.15);
+    this.roar.lfo.frequency.setTargetAtTime(0.6 + spin * 0.45, t, 0.2);
+    this.roar.filter.frequency.setTargetAtTime(120 + s * 260, t, 0.2);
+  }
+
+  /** Hitting the pool: a heavy, brief burst that darkens as it decays. */
+  splash() {
+    this.oneShot({ type: "lowpass", from: 2600, to: 240, q: 0.7, peak: 0.9, attack: 0.01, decay: 0.7 });
+  }
+
+  /** A paddle stroke: short, watery, mid-band. */
+  stroke() {
+    this.oneShot({ type: "bandpass", from: 500, to: 900, q: 1.2, peak: 0.28, attack: 0.02, decay: 0.16 });
+  }
+
+  /** Being pulled into a mouth: a rising whoosh. */
+  whoosh() {
+    this.oneShot({ type: "bandpass", from: 260, to: 2400, q: 0.9, peak: 0.55, attack: 0.05, decay: 0.75 });
+  }
+
+  private oneShot(p: OneShot) {
+    if (!this.ctx || !this.noise || !this.master) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const end = t + p.attack + p.decay;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = p.type;
+    filter.Q.value = p.q;
+    filter.frequency.setValueAtTime(p.from, t);
+    filter.frequency.exponentialRampToValueAtTime(p.to, end);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(p.peak, t + p.attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(t);
+    src.stop(end + 0.05);
+    src.onended = () => {
+      src.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
   }
 
   dispose() {
     void this.ctx?.close();
     this.ctx = null;
   }
-}
-
-function THREE_CLAMP(v: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, v));
 }

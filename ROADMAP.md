@@ -9,20 +9,21 @@ later without touching it.
 
 slide → splash → whirlpool → paddle → choose an exit → next section → …
 
-- **Slide.** Drops, sweeping turns, S-bends, helixes, vertical loops, humps.
+- **Slide.** Drops, sweeping turns, S-bends, corkscrews, vertical loops, humps.
   Speed, momentum, and banking must feel thrilling and coherent.
-- **Whirlpool.** Spins the rider, builds tension, subsides.
+- **Whirlpool.** Spins the rider, builds tension, subsides. Leaning in shortens
+  it, leaning out rides it wide, paddling at the rim escapes it.
 - **Paddle.** Free movement around the pool. Two or three exits, all reachable,
   each opening into a freshly generated section.
 
 ## Controls (fixed contract)
 
-| Input         | Slide              | Pool              |
-| ------------- | ------------------ | ----------------- |
-| W / ↑ / Space | Paddle: accelerate | Paddle forward    |
-| S / ↓         | Brake              | Reverse           |
-| A / D, ← / →  | Lean left / right  | Turn left / right |
-| F             | Fullscreen         | Fullscreen        |
+| Input         | Slide              | Whirlpool           | Pool              |
+| ------------- | ------------------ | ------------------- | ----------------- |
+| W / ↑ / Space | Paddle: accelerate | Paddle out (at rim) | Paddle forward    |
+| S / ↓         | Brake              |                     | Reverse           |
+| A / D, ← / →  | Lean left / right  | Lean in / out       | Turn left / right |
+| F             | Fullscreen         | Fullscreen          | Fullscreen        |
 
 A is always screen-left. Gamepad and touch mirror the same signs.
 
@@ -39,32 +40,41 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where the POC stands (September 2026)
+## Where it stands (Build 2, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r185 on WebGL2, zustand HUD,
-Tailwind v4. No auth, no database.
+Tailwind v4. No auth, no database. Repository:
+github.com/coneyislandpottsville/undertow, PRs squash-merged to main.
 
-Done: the full loop across repeated drops; fixed-step simulation;
+Done in the POC: the full loop across repeated drops; fixed-step simulation;
 rotation-minimizing tube frames; six feature types; lazy section generation
-and pruning; ultrawide FOV; fullscreen; keyboard, gamepad, touch; procedural
-audio; HUD with drop, speed, mode, and exit count; `window.__controlsTest`
-hooks for automated play.
+and pruning; ultrawide FOV; fullscreen; keyboard, gamepad, touch; HUD;
+`window.__controlsTest` hooks for automated play.
+
+Done in Build 2 (phases 1 and 2, PRs #1 to #4):
+
+- Hold at the mouth until the first click; child seeds from parent seed plus
+  exit index; layout guards with deterministic retries.
+- Physics banking from speed² × curvature with A/D lean; airtime lift and
+  heavy-g sink instead of rolls; look-ahead camera with horizon easing.
+- Slope-controlled generation: features start from a cruising band, drops
+  crest and pull out, loops tilt onto the entry tangent and follow a drop,
+  corkscrews and humps ease in and out.
+- Exits: glowing mouths, pulsing rings, lights, surface-current strips.
+- Whirlpool agency: lean in (~3 s), ride wide (~7 s), paddle out at the rim.
+- Paddle current and wake; flow streaks on the tube; splash burst; exit FOV
+  punch; layered procedural audio; g readout in the HUD.
 
 Open:
 
-- The ride starts before the player clicks.
-- Spray spawns within arm's reach of the eye and renders as large squares.
-- Exits are hard to read from across the pool; beacons are static.
-- Seed determinism ends after the first section. Later seeds depend on the
-  order exits are approached.
-- Banking comes from steering only, not from speed and curvature.
-- The whirlpool is a fixed five-second cutscene with no player input.
-- Loops, helixes, and section hand-offs are unverified for camera pops and
-  clipping.
+- Progression undecided: depth counter only.
+- Looks are still solid colour plus streaks; the pool wall reads near-black.
+- Corkscrews at low speed slosh the rider; tune pendulum gain and damping by feel.
+- Mobile untested: touch keys exist, layout and performance do not.
 
 ## Phases
 
-### 1. Harden the loop
+### 1. Harden the loop (done in Build 2)
 
 - Hold at the tube mouth until the first click.
 - Fix spray. Verify the camera through loops, helixes, and section hand-offs.
@@ -73,7 +83,7 @@ Open:
 - Generation guarantees: the tube never cuts its own pool wall, exits never
   overlap the entrance, the speed floor keeps every loop completable.
 
-### 2. Make it thrilling
+### 2. Make it thrilling (done in Build 2, tune by feel)
 
 - Physics banking: speed and curvature push the rider up the outside wall;
   lean adds to it.
@@ -110,6 +120,6 @@ Open:
 
 ## Process
 
-- Version control from Build 2 onward.
 - Every build passes build, typecheck, and browser smoke on dev and built
   output (see `AGENTS.md`). Controls self-test proves A is screen-left.
+- On Windows the npm scripts work as-is; the env wrapper resolves package bins.

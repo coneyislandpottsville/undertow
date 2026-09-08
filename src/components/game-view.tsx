@@ -97,7 +97,11 @@ export function GameView() {
                 {MODE_LABEL[hud.mode]}
               </p>
               <p className="mt-0.5 text-sm tabular-nums text-fg">
-                {hud.mode === "paddle" ? `${hud.exits} exits` : "First person"}
+                {hud.mode === "paddle"
+                  ? `${hud.exits} exits`
+                  : hud.mode === "whirl"
+                    ? "Hold on"
+                    : `${Math.max(-2, Math.min(7, hud.g)).toFixed(1)} g`}
               </p>
             </div>
             <button

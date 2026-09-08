@@ -19,6 +19,7 @@ import {
   makeWhirlTexture,
   paletteAt,
   scrollCurrents,
+  scrollTube,
   type Palette,
 } from "./materials";
 
@@ -46,8 +47,11 @@ export type RideSection = {
   group: THREE.Group;
   whirl: THREE.Mesh;
   water: THREE.Mesh;
-  /** Animate this section's exit cues; call once per frame for the section the rider is in. */
-  tick: (dt: number, elapsed: number) => void;
+  /**
+   * Animate this section's cues; call once per frame for the section the rider
+   * is in. `speed` scrolls the tube's flow streaks (pass 0 outside the tube).
+   */
+  tick: (dt: number, elapsed: number, speed: number) => void;
   dispose: () => void;
 };
 
@@ -376,7 +380,7 @@ function addMouth(
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  const mat = createMouthMaterial(palette);
+  const mat = createMouthMaterial(palette, 9);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   group.add(mesh);
@@ -443,7 +447,7 @@ function assembleMeshes(
 
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, 10, false);
-  const tubeMat = createTubeMaterial(palette);
+  const tubeMat = createTubeMaterial(palette, path.length);
   const tube = new THREE.Mesh(tubeGeo, tubeMat);
   tube.frustumCulled = false;
   group.add(tube);
@@ -514,7 +518,8 @@ function assembleMeshes(
     group,
     whirl,
     water,
-    tick: (dt, elapsed) => {
+    tick: (dt, elapsed, speed) => {
+      scrollTube(tubeMat, dt, speed);
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
