@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Rng } from "./rng";
+import { forkSeed, Rng } from "./rng";
 import {
   buildPath,
   cleanPoints,
@@ -20,6 +20,7 @@ import {
 } from "./materials";
 
 export type Exit = {
+  index: number;
   angle: number;
   position: THREE.Vector3;
   tangent: THREE.Vector3;
@@ -34,6 +35,7 @@ export type PoolData = {
 
 export type RideSection = {
   id: number;
+  seed: number;
   palette: Palette;
   path: PathData;
   pool: PoolData;
@@ -155,7 +157,8 @@ function addLoop(points: THREE.Vector3[], rng: Rng) {
   fwd.normalize();
   const radius = rng.range(11, 16);
   const steps = 20;
-  const drift = rng.range(0.28, 0.5);
+  // The loop's start and end run side by side; keep a tube diameter between them.
+  const drift = rng.range(0.36, 0.55);
   const drop = rng.range(0.08, 0.16);
   const up = new THREE.Vector3(0, 1, 0);
   const center = pos.clone().addScaledVector(up, radius);
@@ -282,7 +285,7 @@ function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exi
     const tangent = outward.clone();
     tangent.y = -0.2;
     tangent.normalize();
-    exits.push({ angle: a, position, tangent, next: null });
+    exits.push({ index: i, angle: a, position, tangent, next: null });
   }
   return exits;
 }
@@ -435,33 +438,83 @@ function assembleMeshes(
   };
 }
 
+const MOUTH_CLEARANCE = 16;
+const GENERATION_ATTEMPTS = 6;
+
+/**
+ * True when the tube stays out of every pool in `avoid` once past its own
+ * mouth, its pool does not overlap them, and it never runs back through itself.
+ */
+function layoutIsClear(path: PathData, pool: PoolData, avoid: PoolData[]): boolean {
+  for (const other of avoid) {
+    const dx = pool.center.x - other.center.x;
+    const dz = pool.center.z - other.center.z;
+    if (Math.hypot(dx, dz) < pool.radius + other.radius + 5) return false;
+  }
+  const samples = path.samples;
+  const minSelf = path.radius * 2 + 0.6;
+  const minSelfSq = minSelf * minSelf;
+  const skip = Math.ceil(14 / path.spacing);
+  for (let i = 0; i < samples.length; i += 2) {
+    const sample = samples[i]!;
+    const p = sample.position;
+    if (sample.distance > MOUTH_CLEARANCE) {
+      for (const other of avoid) {
+        const dx = p.x - other.center.x;
+        const dz = p.z - other.center.z;
+        if (Math.hypot(dx, dz) < other.radius + 2.5 && Math.abs(p.y - other.waterY) < 7) {
+          return false;
+        }
+      }
+    }
+    for (let j = i + skip; j < samples.length; j += 2) {
+      if (p.distanceToSquared(samples[j]!.position) < minSelfSq) return false;
+    }
+  }
+  return true;
+}
+
 export function generateSection(
   seed: number,
   start: THREE.Vector3,
   startDir: THREE.Vector3,
   dropIndex: number,
   first: boolean,
+  avoid: PoolData[] = [],
 ): RideSection {
-  const rng = new Rng(seed);
-  const points: THREE.Vector3[] = [];
-  addLeadIn(points, start, startDir);
-  for (const f of pickFeatures(rng, first)) runFeature(f, points, rng);
-  const pool = addSplash(points, rng);
-  const cleaned = cleanPoints(points);
-  if (cleaned.length < 6) {
-    cleaned.push(start.clone().add(new THREE.Vector3(0, -40, -80)));
-    cleaned.push(pool.center.clone());
+  let rng = new Rng(seed);
+  let pool!: PoolData;
+  let path!: PathData;
+  let cleaned!: THREE.Vector3[];
+  for (let attempt = 0; attempt < GENERATION_ATTEMPTS; attempt++) {
+    // Retries fork the same seed, so a rejected layout is skipped identically on replay.
+    rng = new Rng(attempt === 0 ? seed : forkSeed(seed, 7919 * attempt));
+    const points: THREE.Vector3[] = [];
+    addLeadIn(points, start, startDir);
+    for (const f of pickFeatures(rng, first)) runFeature(f, points, rng);
+    pool = addSplash(points, rng);
+    cleaned = cleanPoints(points);
+    if (cleaned.length < 6) {
+      cleaned.push(start.clone().add(new THREE.Vector3(0, -40, -80)));
+      cleaned.push(pool.center.clone());
+    }
+    const radius = rng.range(2.55, 2.95);
+    path = buildPath(cleaned, radius);
+    if (layoutIsClear(path, pool, avoid)) break;
   }
-  const radius = rng.range(2.55, 2.95);
-  const path = buildPath(cleaned, radius);
   const entrance = lastDir(cleaned);
-  const inward = new THREE.Vector3(pool.center.x - cleaned[cleaned.length - 1]!.x, 0, pool.center.z - cleaned[cleaned.length - 1]!.z);
+  const inward = new THREE.Vector3(
+    pool.center.x - cleaned[cleaned.length - 1]!.x,
+    0,
+    pool.center.z - cleaned[cleaned.length - 1]!.z,
+  );
   if (inward.lengthSq() < 1e-5) inward.copy(entrance);
   const exits = makeExits(pool, inward, rng);
   const palette = paletteAt(dropIndex);
   const meshes = assembleMeshes(path, pool, exits, palette);
   return {
     id: nextId++,
+    seed,
     palette,
     path,
     pool,

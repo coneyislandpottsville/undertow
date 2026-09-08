@@ -73,16 +73,6 @@ export function createTubeMaterial(palette: Palette): THREE.MeshStandardMaterial
   });
 }
 
-export function createStripeMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: palette.stripe,
-    roughness: 0.38,
-    metalness: 0.12,
-    side: THREE.BackSide,
-    envMapIntensity: 0.3,
-  });
-}
-
 export function createRingMaterial(palette: Palette): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: palette.ring,
@@ -134,6 +124,39 @@ export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicMate
     depthWrite: false,
     side: THREE.DoubleSide,
   });
+}
+
+export function createSprayMaterial(): THREE.PointsMaterial {
+  return new THREE.PointsMaterial({
+    color: 0xdff4f8,
+    map: softDotTexture(),
+    size: 0.09,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+}
+
+let softDot: THREE.CanvasTexture | null = null;
+
+/** Radial-falloff sprite so a particle reads as mist at any distance, never a square. */
+export function softDotTexture(): THREE.CanvasTexture {
+  if (softDot) return softDot;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,0.9)");
+  g.addColorStop(0.35, "rgba(255,255,255,0.4)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  softDot = new THREE.CanvasTexture(canvas);
+  return softDot;
 }
 
 export function makeWhirlTexture(): THREE.CanvasTexture {

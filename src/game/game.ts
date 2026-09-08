@@ -3,10 +3,13 @@ import { RideAudio } from "./audio";
 import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
+import { createSprayMaterial } from "./materials";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
 const FIXED = 1 / 60;
+const SPRAY_COUNT = 96;
+const SPRAY_LIFE = 0.75;
 const MAX_BANK = 0.62;
 const SIT = 1.05;
 const MIN_SPEED = 7;
@@ -36,7 +39,6 @@ const _tmp = new THREE.Vector3();
 const _qBank = new THREE.Quaternion();
 const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
-const _euler = new THREE.Euler();
 const _basis = new THREE.Matrix4();
 const _offset = new THREE.Vector3();
 
@@ -66,6 +68,10 @@ export class Game {
   private readonly floatie: THREE.Mesh;
   private readonly spray: THREE.Points;
   private readonly sprayVel: Float32Array;
+  private readonly sprayAge: Float32Array;
+  private sprayEmit = 0;
+  /** Unit vector from the tube axis to the rider's seat on the wall. */
+  private readonly radial = new THREE.Vector3();
   private readonly reducedMotion: boolean;
   private current!: RideSection;
   private mode: Mode = "slide";
@@ -90,7 +96,8 @@ export class Game {
   private raf = 0;
   private disposed = false;
   private whirlWall = 0;
-  private nextSectionSalt = 1;
+  /** False until the first click: the rider waits at the tube mouth. */
+  private released = false;
   private readonly onResize = () => this.resize();
   private readonly onFs = () => this.syncFs();
   private readonly onPointerDown = () => this.focus();
@@ -150,23 +157,13 @@ export class Game {
     this.floatie.position.set(0, -0.78, -0.55);
     this.camera.add(this.floatie);
 
-    const sprayCount = 64;
-    const sprayPos = new Float32Array(sprayCount * 3);
-    this.sprayVel = new Float32Array(sprayCount * 3);
-    for (let i = 0; i < sprayCount; i++) {
-      sprayPos[i * 3 + 2] = -20;
-      this.sprayVel[i * 3 + 2] = -4;
-    }
+    const sprayPos = new Float32Array(SPRAY_COUNT * 3);
+    this.sprayVel = new Float32Array(SPRAY_COUNT * 3);
+    this.sprayAge = new Float32Array(SPRAY_COUNT).fill(-1);
+    for (let i = 0; i < SPRAY_COUNT; i++) sprayPos[i * 3 + 1] = -1000;
     const sprayGeo = new THREE.BufferGeometry();
     sprayGeo.setAttribute("position", new THREE.BufferAttribute(sprayPos, 3));
-    const sprayMat = new THREE.PointsMaterial({
-      color: 0xd8f0f4,
-      size: 0.07,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
-    });
-    this.spray = new THREE.Points(sprayGeo, sprayMat);
+    this.spray = new THREE.Points(sprayGeo, createSprayMaterial());
     this.spray.frustumCulled = false;
     this.scene.add(this.spray);
 
@@ -175,7 +172,7 @@ export class Game {
     this.scene.add(this.current.group);
     this.sections.push(this.current);
     this.dist = 2.4;
-    this.speed = 13;
+    this.speed = 0;
     samplePath(this.current.path, this.dist, _frame);
     this.placeOnTube();
     this.camera.position.copy(this.eye);
@@ -194,6 +191,10 @@ export class Game {
       getSpeed: () => this.speed,
       getMode: () => this.mode,
       getDrop: () => this.drop,
+      getBank: () => this.bank,
+      getPosition: () => [this.px, this.py, this.pz],
+      getSeed: () => this.worldSeed.toString(16),
+      release: () => this.focus(),
       setKeys: (codes) => this.input.setKeys(codes),
       setSteer: (v) => this.input.setSteer(v),
       steerTowardExit: () => this.steerTowardExit(),
@@ -250,6 +251,10 @@ export class Game {
     this.focused = true;
     this.canvas.focus();
     this.audio.unlock();
+    if (!this.released) {
+      this.released = true;
+      this.speed = 5;
+    }
     useHud.getState().patch({ focused: true });
   }
 
@@ -300,11 +305,24 @@ export class Game {
 
   private fixedUpdate(dt: number) {
     if (this.input.consumeFullscreen()) this.toggleFullscreen();
+    if (!this.released) {
+      this.idle();
+      return;
+    }
     if (this.mode === "slide") this.updateSlide(dt);
     else if (this.mode === "whirl") this.updateWhirl(dt);
     else this.updatePaddle(dt);
     this.trauma = Math.max(0, this.trauma - dt * 1.6);
     this.maybePrepareExits();
+  }
+
+  /** Held at the tube mouth until the first click: a gentle sway, no descent. */
+  private idle() {
+    samplePath(this.current.path, this.dist, _frame);
+    this.bank = Math.sin(this.clock.elapsed * 1.1) * 0.03;
+    this.placeOnTube();
+    this.heading = pathHeading(_frame.tangent);
+    this.yaw = this.heading;
   }
 
   private updateSlide(dt: number) {
@@ -340,6 +358,7 @@ export class Game {
     const s = Math.sin(this.bank);
     _offset.copy(_frame.normal).multiplyScalar(-c * sit);
     _offset.addScaledVector(_frame.binormal, -s * sit);
+    this.radial.copy(_offset).normalize();
     this.eye.copy(_frame.position).add(_offset);
     this.eye.addScaledVector(_frame.normal, 0.42);
     this.px = this.eye.x;
@@ -496,21 +515,18 @@ export class Game {
 
   private generateExit(exit: RideSection["exits"][number]) {
     if (exit.next) return;
-    const seed = forkSeed(
-      this.worldSeed,
-      this.nextSectionSalt++ * 997 + this.current.id * 13,
-    );
+    // Child seeds hang off the parent's seed and the exit taken, so any route
+    // through the tree is the same world on every replay of `?seed=`.
+    const seed = forkSeed(this.current.seed, exit.index + 1);
     const start = exit.position.clone();
     const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
     start.addScaledVector(outward, -0.4);
-    const section = generateSection(seed, start, exit.tangent, this.drop, false);
+    const section = generateSection(seed, start, exit.tangent, this.drop, false, [
+      this.current.pool,
+    ]);
     exit.next = section;
     this.scene.add(section.group);
     this.sections.push(section);
-  }
-
-  private generateExits() {
-    for (const exit of this.current.exits) this.generateExit(exit);
   }
 
   private enterExit(exit: RideSection["exits"][number]) {
@@ -525,6 +541,10 @@ export class Game {
     this.bank = 0;
     this.drop += 1;
     this.trauma = Math.max(this.trauma, 0.28);
+    // Refresh the frame now so the very next render aims down the new tube,
+    // not along the previous section's stale tangent.
+    samplePath(next.path, this.dist, _frame);
+    this.placeOnTube();
     this.applyFog(next.palette.fog, 1);
     this.prune(prev);
     useHud.getState().patch({
@@ -613,39 +633,68 @@ export class Game {
 
     const bob = this.reducedMotion ? 0 : Math.sin(this.clock.elapsed * (6 + this.speed * 0.12)) * 0.012 * (this.speed / 20);
     this.camera.position.y += bob;
-    void _euler;
   }
 
   private updateSpray(dt: number) {
     const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
     const arr = positions.array as Float32Array;
-    const emit = this.mode === "slide" && this.speed > 14;
-    this.camera.getWorldDirection(_look);
-    for (let i = 0; i < 64; i++) {
+    const emit = this.mode === "slide" && this.released && this.speed > 11;
+    const cam = this.camera.position;
+    const radius = this.current.path.radius;
+
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+      const age = this.sprayAge[i]!;
+      if (age < 0) continue;
       const i3 = i * 3;
       arr[i3]! += this.sprayVel[i3]! * dt;
       arr[i3 + 1]! += this.sprayVel[i3 + 1]! * dt;
       arr[i3 + 2]! += this.sprayVel[i3 + 2]! * dt;
-      this.sprayVel[i3 + 1]! -= 6 * dt;
-      const dx = arr[i3]! - this.camera.position.x;
-      const dy = arr[i3 + 1]! - this.camera.position.y;
-      const dz = arr[i3 + 2]! - this.camera.position.z;
-      if (!emit || dx * dx + dy * dy + dz * dz > 36) {
-        if (emit && Math.random() < 0.35) {
-          arr[i3] = this.camera.position.x + (Math.random() - 0.5) * 0.8;
-          arr[i3 + 1] = this.camera.position.y - 0.35 + Math.random() * 0.2;
-          arr[i3 + 2] = this.camera.position.z + (Math.random() - 0.5) * 0.8;
-          this.sprayVel[i3] = _look.x * -this.speed * 0.15 + (Math.random() - 0.5) * 2;
-          this.sprayVel[i3 + 1] = -1.5 + Math.random();
-          this.sprayVel[i3 + 2] = _look.z * -this.speed * 0.15 + (Math.random() - 0.5) * 2;
-        } else {
-          arr[i3 + 2] = this.camera.position.z - 40;
-        }
+      this.sprayVel[i3 + 1]! -= 7 * dt;
+      const dx = arr[i3]! - cam.x;
+      const dy = arr[i3 + 1]! - cam.y;
+      const dz = arr[i3 + 2]! - cam.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      // A droplet on the lens reads as a blob; far ones are invisible anyway.
+      if (age + dt > SPRAY_LIFE || d2 < 0.16 || d2 > 144) {
+        this.sprayAge[i] = -1;
+        arr[i3 + 1] = -1000;
+      } else {
+        this.sprayAge[i] = age + dt;
       }
+    }
+
+    this.sprayEmit = emit ? this.sprayEmit + (this.speed - 11) * 4.2 * dt : 0;
+    for (let i = 0; i < SPRAY_COUNT && this.sprayEmit >= 1; i++) {
+      if (this.sprayAge[i]! >= 0) continue;
+      this.sprayEmit -= 1;
+      const i3 = i * 3;
+      // Spray kicks off the wall where the floatie meets the water, just ahead
+      // of the rider, then streams back past the camera.
+      _tmp
+        .copy(_frame.position)
+        .addScaledVector(this.radial, radius - 0.12)
+        .addScaledVector(_frame.tangent, 0.8 + Math.random() * 1.6)
+        .addScaledVector(_frame.binormal, (Math.random() - 0.5) * 1.0);
+      arr[i3] = _tmp.x;
+      arr[i3 + 1] = _tmp.y;
+      arr[i3 + 2] = _tmp.z;
+      const along = this.speed * (0.45 + Math.random() * 0.2);
+      const lift = 1.4 + Math.random() * 2.6;
+      const drift = (Math.random() - 0.5) * 3;
+      _tmp
+        .copy(_frame.tangent)
+        .multiplyScalar(along)
+        .addScaledVector(this.radial, -lift)
+        .addScaledVector(_frame.binormal, drift);
+      this.sprayVel[i3] = _tmp.x;
+      this.sprayVel[i3 + 1] = _tmp.y;
+      this.sprayVel[i3 + 2] = _tmp.z;
+      this.sprayAge[i] = 0;
     }
     positions.needsUpdate = true;
     const mat = this.spray.material as THREE.PointsMaterial;
-    mat.opacity = emit ? Math.min(0.6, (this.speed - 14) / 30) : 0;
+    const target = emit ? THREE.MathUtils.clamp((this.speed - 11) / 26, 0, 0.85) : 0;
+    mat.opacity = expDamp(mat.opacity, target, 6, dt);
   }
 }
 
@@ -656,6 +705,10 @@ declare global {
       getSpeed: () => number;
       getMode?: () => string;
       getDrop?: () => number;
+      getBank?: () => number;
+      getPosition?: () => [number, number, number];
+      getSeed?: () => string;
+      release?: () => void;
       setKeys?: (codes: string[]) => void;
       setSteer?: (v: number) => void;
       steerTowardExit?: () => void;
