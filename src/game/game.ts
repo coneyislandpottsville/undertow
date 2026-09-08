@@ -10,37 +10,60 @@ import { pathHeading, samplePath } from "./path";
 const FIXED = 1 / 60;
 const SPRAY_COUNT = 96;
 const SPRAY_LIFE = 0.75;
-const MAX_BANK = 0.62;
 const SIT = 1.05;
+/** Eye height above the seat, measured toward the tube axis. */
+const HEAD = 0.42;
+/** A/D push along the wall, m/s²: about 38° of bank at rest against gravity. */
+const LEAN_ACCEL = 16;
+/** Seat pendulum damping, 1/s: just under critical, so a lean settles with a hint of sway. */
+const BANK_DAMP = 8;
+/** Stiffens the seat pendulum beyond a free bead, so leans answer in a few tenths of a second. */
+const PENDULUM_GAIN = 1.7;
+/** How far the rider floats toward the axis at full airtime, m. */
+const LIFT_MAX = 1.0;
+/** How far the seat sinks into the wall under heavy g, m. */
+const SINK_MAX = 0.18;
+/** How far down the tube the camera peeks, m. */
+const LOOK_AHEAD = 6;
 const MIN_SPEED = 7;
 const MAX_SPEED = 46;
 const GRAVITY = 26;
 const FLOW = 5.2;
 const PADDLE_ACCEL = 18;
 const BRAKE_DRAG = 3.4;
-const QUAD_DRAG = 0.012;
+/** Quadratic drag: caps steep drops near MAX_SPEED without bleeding loops dry. */
+const QUAD_DRAG = 0.0085;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;
 const WHIRL_TIME = 5.1;
 
-const _frame = {
-  position: new THREE.Vector3(),
-  tangent: new THREE.Vector3(),
-  normal: new THREE.Vector3(),
-  binormal: new THREE.Vector3(),
-  quat: new THREE.Quaternion(),
-};
+function makeFrame() {
+  return {
+    position: new THREE.Vector3(),
+    tangent: new THREE.Vector3(),
+    normal: new THREE.Vector3(),
+    binormal: new THREE.Vector3(),
+    curvature: new THREE.Vector3(),
+    quat: new THREE.Quaternion(),
+  };
+}
+const _frame = makeFrame();
+const _ahead = makeFrame();
 const _up = new THREE.Vector3(0, 1, 0);
 const _look = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
-const _qBank = new THREE.Quaternion();
+const _accel = new THREE.Vector3();
+const _rhat = new THREE.Vector3();
+const _that = new THREE.Vector3();
+const _bodyUp = new THREE.Vector3();
+const _upProj = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
 const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
-const _offset = new THREE.Vector3();
 
 type Mode = RideMode;
 
@@ -77,7 +100,15 @@ export class Game {
   private mode: Mode = "slide";
   private dist = 2;
   private speed = 14;
+  /** Seat angle around the tube's cross-section; 0 is the frame floor, positive is screen-left. */
   private bank = 0;
+  private bankVel = 0;
+  /** Airtime float toward the axis, m. */
+  private lift = 0;
+  /** Heavy-g sink into the wall, m. */
+  private sink = 0;
+  /** Apparent acceleration pressing the rider into the wall, m/s² (negative in airtime). */
+  private press = GRAVITY;
   private yaw = 0;
   private drop = 1;
   private whirlT = 0;
@@ -192,6 +223,8 @@ export class Game {
       getMode: () => this.mode,
       getDrop: () => this.drop,
       getBank: () => this.bank,
+      getLift: () => this.lift,
+      getPress: () => this.press,
       getPosition: () => [this.px, this.py, this.pz],
       getSeed: () => this.worldSeed.toString(16),
       release: () => this.focus(),
@@ -330,8 +363,6 @@ export class Game {
     samplePath(path, this.dist, _frame);
     const throttle = this.input.getThrottle();
     const steer = this.input.getSteer();
-    const targetBank = steer * MAX_BANK;
-    this.bank = expDamp(this.bank, targetBank, 10, dt);
 
     const g = -_frame.tangent.y * GRAVITY;
     this.speed += (g + FLOW) * dt;
@@ -341,6 +372,7 @@ export class Game {
     this.speed = THREE.MathUtils.clamp(this.speed, MIN_SPEED, MAX_SPEED);
     this.dist += this.speed * dt;
 
+    this.updateBank(steer, dt);
     this.placeOnTube();
     this.heading = pathHeading(_frame.tangent) + this.bank;
     this.yaw = this.heading;
@@ -352,15 +384,47 @@ export class Game {
     }
   }
 
-  private placeOnTube() {
-    const sit = this.current.path.radius - SIT;
+  /**
+   * The rider is a bead on the tube's cross-section ring, driven by the apparent
+   * acceleration in their own frame: gravity plus the centrifugal push away from
+   * the curve's centre. Turns press them up the outside wall in proportion to
+   * speed² × curvature; A/D adds a push along the wall. Whatever part of that
+   * acceleration points away from the wall is airtime: the seat floats toward
+   * the axis instead of flipping the rider over, so loop tops and hump crests
+   * read as weightlessness rather than a barrel roll.
+   */
+  private updateBank(steer: number, dt: number) {
+    const v2 = this.speed * this.speed;
+    _accel.set(0, -GRAVITY, 0).addScaledVector(_frame.curvature, -v2);
+    _accel.addScaledVector(_frame.tangent, -_accel.dot(_frame.tangent));
     const c = Math.cos(this.bank);
     const s = Math.sin(this.bank);
-    _offset.copy(_frame.normal).multiplyScalar(-c * sit);
-    _offset.addScaledVector(_frame.binormal, -s * sit);
-    this.radial.copy(_offset).normalize();
-    this.eye.copy(_frame.position).add(_offset);
-    this.eye.addScaledVector(_frame.normal, 0.42);
+    _rhat.copy(_frame.normal).multiplyScalar(-c).addScaledVector(_frame.binormal, -s);
+    _that.copy(_frame.normal).multiplyScalar(s).addScaledVector(_frame.binormal, -c);
+    const into = _accel.dot(_rhat);
+    // Off the wall, the seat mostly holds its angle and floats instead of sloshing
+    // around the ring; a quarter of the push remains so a rider left high on the
+    // wall after a corkscrew still slides down to the bottom.
+    const contact = THREE.MathUtils.clamp(1 + into / 16, 0.25, 1);
+    const along = _accel.dot(_that) * contact + steer * LEAN_ACCEL;
+    const seat = this.current.path.radius - SIT;
+    this.bankVel += ((along * PENDULUM_GAIN) / seat - BANK_DAMP * this.bankVel) * dt;
+    this.bank += this.bankVel * dt;
+    if (this.bank > Math.PI) this.bank -= Math.PI * 2;
+    else if (this.bank < -Math.PI) this.bank += Math.PI * 2;
+    const liftTarget = into < 0 ? Math.min(LIFT_MAX, (-into / GRAVITY) * LIFT_MAX) : 0;
+    this.lift = expDamp(this.lift, liftTarget, into < 0 ? 5 : 9, dt);
+    const sinkTarget = THREE.MathUtils.clamp((into - GRAVITY) / 90, 0, 1) * SINK_MAX;
+    this.sink = expDamp(this.sink, sinkTarget, 7, dt);
+    this.press = into;
+  }
+
+  private placeOnTube() {
+    const c = Math.cos(this.bank);
+    const s = Math.sin(this.bank);
+    this.radial.copy(_frame.normal).multiplyScalar(-c).addScaledVector(_frame.binormal, -s);
+    const seat = this.current.path.radius - SIT - HEAD - this.lift + this.sink;
+    this.eye.copy(_frame.position).addScaledVector(this.radial, seat);
     this.px = this.eye.x;
     this.py = this.eye.y;
     this.pz = this.eye.z;
@@ -375,6 +439,9 @@ export class Game {
     this.whirlAngle = Math.atan2(dx, dz);
     this.whirlRadius = Math.max(4.5, Math.hypot(dx, dz));
     this.bank = 0;
+    this.bankVel = 0;
+    this.lift = 0;
+    this.sink = 0;
     this.trauma = Math.max(this.trauma, 0.55);
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
@@ -539,6 +606,9 @@ export class Game {
     this.dist = 2.2;
     this.speed = Math.max(11, Math.abs(this.speed) + 6);
     this.bank = 0;
+    this.bankVel = 0;
+    this.lift = 0;
+    this.sink = 0;
     this.drop += 1;
     this.trauma = Math.max(this.trauma, 0.28);
     // Refresh the frame now so the very next render aims down the new tube,
@@ -588,11 +658,36 @@ export class Game {
 
   private updateCamera(dt: number) {
     if (this.mode === "slide") {
-      _qTarget.copy(_frame.quat);
-      _qBank.setFromAxisAngle(_frame.tangent, -this.bank * 0.42);
-      _qTarget.premultiply(_qBank);
-      _qDown.setFromAxisAngle(_frame.binormal, -0.1);
-      _qTarget.multiply(_qDown);
+      // Aim along the tube, pulled a little toward where the path goes next so
+      // turns and loops read before the rider is in them.
+      const path = this.current.path;
+      samplePath(path, Math.min(this.dist + LOOK_AHEAD, path.length), _ahead);
+      _look.copy(_ahead.position).sub(this.eye);
+      if (_look.lengthSq() > 1e-4) _look.normalize();
+      else _look.copy(_frame.tangent);
+      _fwd.copy(_frame.tangent).multiplyScalar(0.6).addScaledVector(_look, 0.4).normalize();
+
+      // Up is the rider's body up (seat toward axis), eased toward world up while
+      // upright so banked turns tilt the horizon without losing it. Inverted,
+      // body up wins outright: there is no horizon to keep.
+      _bodyUp.copy(this.radial).negate();
+      const upright = THREE.MathUtils.clamp(_bodyUp.y + 0.5, 0, 1);
+      _upProj.copy(_up).addScaledVector(_fwd, -_up.dot(_fwd));
+      if (_upProj.lengthSq() > 1e-3) {
+        _upProj.normalize();
+        _camUp.copy(_bodyUp).lerp(_upProj, 0.45 * upright);
+      } else {
+        _camUp.copy(_bodyUp);
+      }
+      _camUp.addScaledVector(_fwd, -_camUp.dot(_fwd));
+      if (_camUp.lengthSq() < 1e-4) _camUp.copy(_bodyUp).addScaledVector(_fwd, -_bodyUp.dot(_fwd));
+      _camUp.normalize();
+      _right.crossVectors(_fwd, _camUp).normalize();
+      _tmp.copy(_fwd).negate();
+      _basis.makeBasis(_right, _camUp, _tmp);
+      _qTarget.setFromRotationMatrix(_basis);
+      _qDown.setFromAxisAngle(_right, -0.08);
+      _qTarget.premultiply(_qDown);
     } else {
       _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       if (this.mode === "whirl") {
@@ -706,6 +801,8 @@ declare global {
       getMode?: () => string;
       getDrop?: () => number;
       getBank?: () => number;
+      getLift?: () => number;
+      getPress?: () => number;
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
       release?: () => void;

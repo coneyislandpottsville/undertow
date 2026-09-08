@@ -5,6 +5,8 @@ export type PathSample = {
   tangent: THREE.Vector3;
   normal: THREE.Vector3;
   binormal: THREE.Vector3;
+  /** dT/ds: points at the centre of curvature, magnitude 1 / turn radius. */
+  curvature: THREE.Vector3;
   quat: THREE.Quaternion;
   distance: number;
 };
@@ -72,12 +74,14 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
     tangents.push(t);
   }
   const normals = computeRmf(spaced, tangents);
+  const curvatures = computeCurvature(tangents, length / (spaced.length - 1));
   const samples: PathSample[] = [];
   const actualSpacing = length / (spaced.length - 1);
 
   for (let i = 0; i < spaced.length; i++) {
     const tangent = tangents[i]!;
     const normal = normals[i]!;
+    const curvature = curvatures[i]!;
     const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
     if (binormal.lengthSq() < 0.5) {
       binormal.crossVectors(tangent, orthonormalUp(tangent)).normalize();
@@ -91,12 +95,41 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
       tangent,
       normal,
       binormal,
+      curvature,
       quat,
       distance: i * actualSpacing,
     });
   }
 
   return { curve, samples, length, spacing: actualSpacing, radius };
+}
+
+/**
+ * Curvature vectors by central difference of the unit tangents, then a short
+ * box filter so Catmull-Rom knots do not read as kinks to the rider physics.
+ */
+function computeCurvature(tangents: THREE.Vector3[], spacing: number): THREE.Vector3[] {
+  const n = tangents.length;
+  const raw: THREE.Vector3[] = [];
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(n - 1, i + 1);
+    const ds = Math.max(spacing * (hi - lo), 1e-6);
+    raw.push(new THREE.Vector3().subVectors(tangents[hi]!, tangents[lo]!).divideScalar(ds));
+  }
+  const smooth: THREE.Vector3[] = [];
+  for (let i = 0; i < n; i++) {
+    const acc = new THREE.Vector3();
+    let count = 0;
+    for (let k = -2; k <= 2; k++) {
+      const j = i + k;
+      if (j < 0 || j >= n) continue;
+      acc.add(raw[j]!);
+      count++;
+    }
+    smooth.push(acc.divideScalar(count));
+  }
+  return smooth;
 }
 
 export function samplePath(
@@ -107,6 +140,7 @@ export function samplePath(
     tangent: THREE.Vector3;
     normal: THREE.Vector3;
     binormal: THREE.Vector3;
+    curvature: THREE.Vector3;
     quat: THREE.Quaternion;
   },
 ) {
@@ -118,6 +152,7 @@ export function samplePath(
   const a = path.samples[i]!;
   const b = path.samples[i + 1]!;
   out.position.lerpVectors(a.position, b.position, f);
+  out.curvature.lerpVectors(a.curvature, b.curvature, f);
   out.tangent.lerpVectors(a.tangent, b.tangent, f).normalize();
   out.normal.lerpVectors(a.normal, b.normal, f).normalize();
   out.binormal.crossVectors(out.tangent, out.normal).normalize();
