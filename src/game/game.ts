@@ -5,6 +5,7 @@ import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 import { createSprayMaterial, createWakeMaterial } from "./materials";
+import { createRidePost, type RidePost } from "./post";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
@@ -95,6 +96,9 @@ export class Game {
   private readonly meter = new FrameMeter();
   /** Same shape as the lab prototypes publish, so scripts/lab-bench.mjs can measure the ride. */
   private readonly api: LabApi;
+  /** Bloom and zoom blur; null with `?post=0`, which renders the scene pass straight to the canvas. */
+  private post: RidePost | null = null;
+  private readonly postOn: boolean;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly input = new Input();
@@ -178,6 +182,7 @@ export class Game {
     const query = new URLSearchParams(window.location.search);
     const forceWebGL = query.get("backend") === "webgl";
     this.gpuTiming = query.has("gpu");
+    this.postOn = query.get("post") !== "0";
     this.renderer = new THREE.WebGPURenderer({
       canvas,
       antialias: true,
@@ -329,6 +334,7 @@ export class Game {
     this.api.backend = this.backend;
     this.api.ready = true;
     this.resize();
+    if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
     this.running = true;
     this.clock.prev = performance.now();
     this.raf = requestAnimationFrame(this.loop);
@@ -346,6 +352,7 @@ export class Game {
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
     for (const quad of this.wake) (quad.material as THREE.Material).dispose();
+    this.post?.dispose();
     if (this.initialized) this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
     if (window.__lab === this.api) delete window.__lab;
@@ -420,7 +427,8 @@ export class Game {
     }
     if (this.clock.acc > FIXED * 3) this.clock.acc = 0;
     this.present(dt);
-    this.renderer.render(this.scene, this.camera);
+    if (this.post) this.post.render();
+    else this.renderer.render(this.scene, this.camera);
     this.meter.tick(dt);
     if (this.gpuTiming) {
       // Resolve every frame: the query pool is per pass and overflows if resolves are skipped.
@@ -773,6 +781,12 @@ export class Game {
   private present(dt: number) {
     this.fovPunch = expDamp(this.fovPunch, 0, 4, dt);
     this.applyFov();
+    if (this.post) {
+      // Radial blur rides the same cues as the FOV: a touch at full speed, a
+      // pull toward the centre on the exit suck-in that decays with the punch.
+      const v = Math.abs(this.speed) / MAX_SPEED;
+      this.post.zoom.value = this.reducedMotion ? 0 : 0.03 * v * v + (this.fovPunch / 12) * 0.07;
+    }
     this.updateCamera(dt);
     this.cavern.position.copy(this.camera.position);
     this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
