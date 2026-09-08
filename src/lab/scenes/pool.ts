@@ -36,7 +36,7 @@ import {
 import type { Node } from "three/webgpu";
 import type { LabParams, LabScene } from "../harness";
 import { createNodeRenderer } from "../node-renderer";
-import { floorCanvas } from "../textures";
+import { floorCanvas } from "@/game/textures";
 import { addLights, applyRideFov, canvasTexture, disposeAll } from "./shared-node";
 
 type F = Node<"float">;

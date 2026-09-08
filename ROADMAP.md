@@ -118,10 +118,12 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
 - Step 1 (done in Build 3.1): `three/webgpu` import, materials.ts as node
   materials, the ride pixel-equivalent on both backends. The ride publishes the
   lab's `window.__lab` meter; numbers per step in `docs/research/ride-bench.md`.
-- Then, in product order: tube water film (speed at 40 m/s), bloom and radial
-  blur (exit rings and current strips already assume it), whirlpool funnel
-  (the tension moment), pool reflection and refraction with the compute height
-  field, spray and mist.
+- Then, in product order: tube water film (done in Build 3.2: flow-mapped
+  ripple normals, wet roughness, anisotropic streaks, wall refraction, flow at
+  a share of rider speed; mouths inherit it), bloom and radial blur (exit rings
+  and current strips already assume it), whirlpool funnel (the tension
+  moment), pool reflection and refraction with the compute height field, spray
+  and mist.
 - Budget: 60 fps at 3440×1440 on an RTX 2060 class GPU with everything on;
   measured costs in `docs/research/water-bench.md`. Fallback tier on WebGL 2:
   analytic ripples instead of the height field, fewer particles, half-res

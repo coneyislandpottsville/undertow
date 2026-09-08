@@ -1,6 +1,24 @@
 import * as THREE from "three/webgpu";
-import { instancedDynamicBufferAttribute } from "three/tsl";
-import { Rng } from "./rng";
+import {
+  abs,
+  color,
+  float,
+  fract,
+  instancedDynamicBufferAttribute,
+  mix,
+  modelNormalMatrix,
+  normalLocal,
+  normalMap,
+  smoothstep,
+  texture,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vertexStage,
+} from "three/tsl";
+import type { Node } from "three/webgpu";
+import { rippleNormalCanvas, softDotCanvas, streakCanvas } from "./textures";
 
 /**
  * All ride materials live here so themed environments, animated maps, and
@@ -11,67 +29,100 @@ import { Rng } from "./rng";
 export { PALETTES, paletteAt, type Palette } from "./palette";
 import type { Palette } from "./palette";
 
-/** Tube interior. `length` sizes the flow-streak texture so streaks stay a few metres long. */
-export function createTubeMaterial(palette: Palette, length = 12): THREE.MeshStandardNodeMaterial {
-  const map = streakTexture().clone();
-  map.repeat.set(2, Math.max(1, length / 5));
-  map.needsUpdate = true;
-  return new THREE.MeshStandardNodeMaterial({
-    color: palette.tube,
-    map,
-    roughness: 0.46,
-    metalness: 0.08,
-    side: THREE.BackSide,
-    envMapIntensity: 0.35,
-  });
-}
+type V2 = Node<"vec2">;
+type V3 = Node<"vec3">;
 
-/** Scroll the tube's streaks past the rider; call each frame for the section being ridden. */
-export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
-  const map = (mat as THREE.MeshStandardNodeMaterial).map;
-  if (!map) return;
-  map.offset.y = (((map.offset.y + (speed * dt * 0.7) / 5) % 1) + 1) % 1;
-}
+/** Share of rider speed the film flows at along the wall; the rest of the speed streams past the rider. */
+const FILM_FLOW = 0.15;
+/** Idle trickle, m/s, so a held rider or an exit mouth never shows a frozen film. */
+const FILM_IDLE = 0.5;
+/** Metres of flow per flow-map cycle: each ripple layer scrolls this far, then hands over to its twin. */
+const FILM_CYCLE = 8;
+/** Ripple tile length along the tube, m. */
+const RIPPLE_TILE = 2;
+/** Streak tile length along the tube, m. */
+const STREAK_TILE = 5;
+
+/** Per-material flow distance, m, advanced by scrollTube(). */
+const flows = new WeakMap<THREE.Material, { value: number }>();
+/** Shared clock for the idle trickle; scrollCurrents() advances it once per frame. */
+const uClock = uniform(0);
 
 let streakTex: THREE.CanvasTexture | null = null;
+let rippleTex: THREE.CanvasTexture | null = null;
 
-/**
- * Near-white base with soft lengthwise streaks and two faint seams per tile, so
- * the palette colour still reads while the wall shows motion and distance.
- * Seeded, so every session draws the same wall.
- */
-export function streakTexture(): THREE.CanvasTexture {
-  if (streakTex) return streakTex;
-  const rng = new Rng(7);
-  const w = 256;
-  const h = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#e4e4e4";
-  ctx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 70; i++) {
-    const x = rng.float() * w;
-    const y = rng.float() * h;
-    const len = 60 + rng.float() * 220;
-    const light = rng.chance(0.5);
-    const c = light ? "255,255,255" : "110,122,128";
-    const g = ctx.createLinearGradient(0, y, 0, y + len);
-    g.addColorStop(0, `rgba(${c},0)`);
-    g.addColorStop(0.5, `rgba(${c},${light ? 0.4 : 0.32})`);
-    g.addColorStop(1, `rgba(${c},0)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y, 2 + rng.float() * 4, len);
-  }
-  ctx.fillStyle = "rgba(90,100,105,0.35)";
-  for (let i = 0; i < 2; i++) ctx.fillRect(0, (i + 0.5) * (h / 2) - 2, w, 4);
+function repeatTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 8;
-  streakTex = tex;
   return tex;
+}
+
+function tubeTextures() {
+  streakTex ??= repeatTexture(streakCanvas(true));
+  rippleTex ??= repeatTexture(rippleNormalCanvas(256, 11, 1.2));
+  return { streak: streakTex, ripple: rippleTex };
+}
+
+/**
+ * Tube interior: the wall's streak map seen through a thin water film.
+ * Wetness comes from the geometric normal (the floor faces down), so the lower
+ * wall carries flow-mapped ripple normals at two scales, roughness drops from
+ * 0.5 dry to 0.1 wet, the wall map is refracted through the ripples, and the
+ * specular lobe is stretched along the flow. The film moves at a share of the
+ * rider's speed (scrollTube) plus an idle trickle. `length` and `radius` size
+ * the tiling so ripples stay 2 m and streaks 5 m long on any section.
+ */
+export function createTubeMaterial(
+  palette: Palette,
+  length = 12,
+  radius = 2.75,
+): THREE.MeshPhysicalNodeMaterial {
+  const { streak, ripple } = tubeTextures();
+  const uFlow = uniform(0);
+  const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
+
+  const worldNormal = vertexStage(modelNormalMatrix.mul(normalLocal).normalize());
+  const wet = smoothstep(-0.15, 0.85, worldNormal.y.negate());
+
+  // u runs along the tube, v around it. A whole number of ripple tiles around
+  // the tube keeps the v seam invisible; layer B doubles that and stretches
+  // along the flow so the two never line up.
+  const aroundTiles = Math.max(1, Math.round((Math.PI * 2 * radius) / RIPPLE_TILE));
+  const base = vec2(uv().x.mul(length / RIPPLE_TILE), uv().y.mul(aroundTiles));
+  const phase1 = fract(flowDist.div(FILM_CYCLE));
+  const phase2 = fract(phase1.add(0.5));
+  const blend = abs(phase1.mul(2).sub(1));
+  const flowSample = (uvNode: V2, tilesPerCycle: number): V3 => {
+    const n1 = texture(ripple, uvNode.sub(vec2(phase1.mul(tilesPerCycle), 0))).xyz;
+    const n2 = texture(ripple, uvNode.sub(vec2(phase2.mul(tilesPerCycle), 0))).xyz;
+    return mix(n1, n2, blend).mul(2).sub(1);
+  };
+  const tiles = FILM_CYCLE / RIPPLE_TILE;
+  const tnA = flowSample(base, tiles);
+  const tnB = flowSample(base.mul(vec2(2.3, 2)), tiles * 1.3 * 2.3);
+  const tn = tnA.add(tnB).normalize();
+
+  // Wall seen through the film: the streak map sampled with a normal-driven offset.
+  const wallUV = vec2(uv().x.mul(length / STREAK_TILE), uv().y.mul(2)).add(tn.xy.mul(0.06).mul(wet));
+  const wallColor = texture(streak, wallUV).rgb.mul(color(palette.tube));
+  const filmTint = mix(vec3(1), color(palette.water).mul(1.3), wet.mul(0.35));
+
+  const mat = new THREE.MeshPhysicalNodeMaterial({ side: THREE.BackSide, metalness: 0.05 });
+  mat.colorNode = wallColor.mul(filmTint);
+  mat.normalNode = normalMap(tn.mul(0.5).add(0.5), vec2(mix(float(0.15), float(0.7), wet)));
+  mat.roughnessNode = mix(float(0.5), float(0.1), wet);
+  mat.anisotropyNode = vec2(wet.mul(0.9).add(0.001), 0.001);
+  mat.anisotropy = 1;
+  flows.set(mat, uFlow);
+  return mat;
+}
+
+/** Push the section's film along at a share of rider speed; call each frame for the section being ridden. */
+export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
+  const flow = flows.get(mat);
+  if (flow) flow.value += FILM_FLOW * Math.max(0, speed) * dt;
 }
 
 export function createRingMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
@@ -107,9 +158,13 @@ export function createWallMaterial(palette: Palette): THREE.MeshStandardNodeMate
   });
 }
 
-/** Exit mouth: the tube material lit from inside so the hole reads from across the pool. */
-export function createMouthMaterial(palette: Palette, length = 9): THREE.MeshStandardNodeMaterial {
-  const mat = createTubeMaterial(palette, length);
+/** Exit mouth: the tube material, film included, lit from inside so the hole reads from across the pool. */
+export function createMouthMaterial(
+  palette: Palette,
+  length = 9,
+  radius = 2.75,
+): THREE.MeshPhysicalNodeMaterial {
+  const mat = createTubeMaterial(palette, length, radius);
   mat.emissive = new THREE.Color(palette.accent);
   mat.emissiveIntensity = 0.16;
   return mat;
@@ -185,10 +240,14 @@ export function currentTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-/** Advance the shared current texture so every strip flows toward its mouth. */
+/**
+ * Advance the shared per-frame state: the current strips flow toward their
+ * mouths and the film's idle trickle ticks on every tube and mouth.
+ */
 export function scrollCurrents(dt: number) {
   const tex = currentTexture();
   tex.offset.y = (((tex.offset.y - dt * 0.42) % 1) + 1) % 1;
+  uClock.value += dt;
 }
 
 export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicNodeMaterial {
@@ -225,19 +284,7 @@ let softDot: THREE.CanvasTexture | null = null;
 
 /** Radial-falloff sprite so a particle reads as mist at any distance, never a square. */
 export function softDotTexture(): THREE.CanvasTexture {
-  if (softDot) return softDot;
-  const size = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, "rgba(255,255,255,0.9)");
-  g.addColorStop(0.35, "rgba(255,255,255,0.4)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  softDot = new THREE.CanvasTexture(canvas);
+  softDot ??= new THREE.CanvasTexture(softDotCanvas());
   return softDot;
 }
 

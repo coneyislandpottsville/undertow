@@ -380,7 +380,8 @@ function addMouth(
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  const mat = createMouthMaterial(palette, 9);
+  geo.computeTangents();
+  const mat = createMouthMaterial(palette, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   group.add(mesh);
@@ -447,7 +448,10 @@ function assembleMeshes(
 
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, 10, false);
-  const tubeMat = createTubeMaterial(palette, path.length);
+  // The film's normal map and anisotropy need per-vertex tangents; the
+  // derivative fallback is skewed by the tube's long, thin uv parametrisation.
+  tubeGeo.computeTangents();
+  const tubeMat = createTubeMaterial(palette, path.length, path.radius);
   const tube = new THREE.Mesh(tubeGeo, tubeMat);
   tube.frustumCulled = false;
   group.add(tube);

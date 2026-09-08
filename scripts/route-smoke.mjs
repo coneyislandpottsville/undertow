@@ -41,6 +41,8 @@ const seed = args.seed ?? "undertow";
 const rideSeconds = Number(args["ride-seconds"] ?? 5);
 const shots = args.shots ?? "screenshots/smoke";
 const tag = args.tag ?? "branch";
+/** Extra query string appended to every URL, e.g. --query "sim=compute" or a ride knob. */
+const extraQuery = new URLSearchParams(args.query ?? "");
 mkdirSync(shots, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,6 +74,7 @@ for (const route of routes) {
     const isRide = route === "/";
     const q = new URLSearchParams({ backend });
     if (isRide) q.set("seed", seed);
+    for (const [k, v] of extraQuery) q.set(k, v);
     const url = `${base}${route}?${q}`;
     const before = logs.length;
     const name = `${tag}-${isRide ? "ride" : slug(route)}-${backend}`;

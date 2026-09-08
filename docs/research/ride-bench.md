@@ -11,8 +11,14 @@ are GPU milliseconds per frame from timestamp queries (`?gpu=1`). Machine and br
 | 2.4, classic `WebGLRenderer`, r185 | glsl | 1322 | 785 |
 | 3.1, `WebGPURenderer`, r186 (Step 1: the switch) | webgpu | 820 (0.8) | 757 (1.5) |
 | 3.1, `WebGPURenderer`, r186 (Step 1: the switch) | webgl | 1155 (1.2) | 822 (1.9) |
+| 3.2, tube water film (Step 2) | webgpu | 764 (1.1) | 758 (2.0) |
+| 3.2, tube water film (Step 2) | webgl | 953 (1.3) | 762 (2.1) |
 
 Notes:
+
+- Step 2 adds 0.3 to 0.5 ms of GPU time per frame for the film (flow-mapped normals at two
+  scales, refraction, anisotropic physical lighting on every tube and mouth in view); frame
+  rates barely move because the ride is CPU-bound at these draw counts.
 
 - Step 1 is pixel-equivalent to Build 2 (held frame at the same seed: mean difference under 0.3 of
   255 on both backends, only one-pixel ring edges differ). The WebGPU path spends about 0.4 ms
