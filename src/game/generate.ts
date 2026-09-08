@@ -61,130 +61,157 @@ function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
   points.push(points[points.length - 1]!.clone().addScaledVector(dir, dist));
 }
 
+const UP = new THREE.Vector3(0, 1, 0);
+/** Cruising slope band (unit-vector y). Every feature starts from inside it. */
+const CRUISE_MIN = -0.34;
+const CRUISE_MAX = -0.1;
+
+/** Unit direction with `dir`'s heading and vertical component `pitch` (negative is down). */
+function withPitch(dir: THREE.Vector3, pitch: number): THREE.Vector3 {
+  const p = THREE.MathUtils.clamp(pitch, -0.98, 0.98);
+  const h = Math.hypot(dir.x, dir.z);
+  const flat = Math.sqrt(1 - p * p);
+  if (h < 1e-4) return new THREE.Vector3(flat, p, 0);
+  return new THREE.Vector3((dir.x / h) * flat, p, (dir.z / h) * flat);
+}
+
+function smoothstep(a: number, b: number, x: number): number {
+  const u = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1);
+  return u * u * (3 - 2 * u);
+}
+
 function addLeadIn(points: THREE.Vector3[], start: THREE.Vector3, dir: THREE.Vector3) {
   points.push(start.clone());
-  const d = dir.clone().normalize();
-  d.y = Math.min(d.y, -0.12);
-  d.normalize();
-  for (let i = 1; i <= 10; i++) {
-    const p = start.clone().addScaledVector(d, i * 6.2);
-    p.y -= i * 0.5;
-    points.push(p);
+  const d = withPitch(dir, THREE.MathUtils.clamp(dir.y, CRUISE_MIN, CRUISE_MAX));
+  for (let i = 1; i <= 6; i++) pushAlong(points, d, 6.5);
+}
+
+/** Ease back to a cruising slope so the next feature starts from one, never from a plunge. */
+function levelOut(points: THREE.Vector3[], rng: Rng) {
+  const dir = lastDir(points);
+  if (dir.y <= CRUISE_MAX && dir.y >= CRUISE_MIN) return;
+  const target = rng.range(CRUISE_MIN, CRUISE_MAX);
+  const steps = 4;
+  for (let i = 1; i <= steps; i++) {
+    const pitch = THREE.MathUtils.lerp(dir.y, target, smoothstep(0, 1, i / steps));
+    pushAlong(points, withPitch(dir, pitch), 6.5);
   }
 }
 
+/** Crest, plunge, pull out: steepest mid-way, back at the entry slope by the bottom. */
 function addDrop(points: THREE.Vector3[], rng: Rng) {
   const dir = lastDir(points);
-  const length = rng.range(28, 58);
-  const steep = rng.range(0.65, 1.15);
-  const steps = 8;
+  const entry = THREE.MathUtils.clamp(dir.y, CRUISE_MIN, CRUISE_MAX);
+  const length = rng.range(42, 70);
+  const steep = rng.range(0.72, 0.93);
+  const steps = 10;
   const right = orthonormalRight(dir);
-  const sway = rng.range(-0.32, 0.32);
+  const sway = rng.range(-0.3, 0.3);
   for (let i = 1; i <= steps; i++) {
     const u = i / steps;
-    const d = dir.clone();
-    d.y -= steep * Math.sin(u * Math.PI);
-    d.addScaledVector(right, sway * u);
-    d.normalize();
+    const pitch = THREE.MathUtils.lerp(entry, -steep, Math.sin(u * Math.PI));
+    const d = withPitch(dir, pitch).addScaledVector(right, sway * u).normalize();
     pushAlong(points, d, length / steps);
   }
 }
 
+/** Banked turn at a cruising slope; curvature stays 0.01 to 0.04 so speed sets the bank. */
 function addSweep(points: THREE.Vector3[], rng: Rng) {
   const dir = lastDir(points);
   const arc = rng.range(0.7, 1.55) * rng.sign();
-  const length = rng.range(38, 72);
-  const drop = rng.range(7, 16);
+  const length = Math.max(rng.range(42, 76), Math.abs(arc) * 32);
+  const slope = rng.range(0.12, 0.3);
   const steps = 10;
   const d = dir.clone();
-  const yaw = arc / steps;
   for (let i = 1; i <= steps; i++) {
-    d.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    d.y -= drop / length;
-    d.normalize();
+    d.applyAxisAngle(UP, arc / steps);
+    d.copy(withPitch(d, THREE.MathUtils.lerp(d.y, -slope, 0.4)));
     pushAlong(points, d, length / steps);
   }
 }
 
+/** Two opposite banks; amplitude follows length so peak curvature stays 0.03 to 0.05. */
 function addS(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
-  const length = rng.range(40, 68);
-  const amp = rng.range(7, 16);
-  const drop = rng.range(7, 14);
-  const steps = 12;
-  const right = orthonormalRight(dir);
+  const length = rng.range(48, 72);
+  const axis = withPitch(dir, -rng.range(0.1, 0.24));
+  const amp = rng.range(0.03, 0.05) * (length / (Math.PI * 2)) ** 2;
+  const right = orthonormalRight(axis);
   const phase = rng.sign();
+  const steps = 12;
   for (let i = 1; i <= steps; i++) {
     const u = i / steps;
-    const p = pos
-      .clone()
-      .addScaledVector(dir, u * length)
-      .addScaledVector(right, Math.sin(u * Math.PI * 2) * amp * phase);
-    p.y -= u * drop;
-    points.push(p);
+    points.push(
+      pos
+        .clone()
+        .addScaledVector(axis, u * length)
+        .addScaledVector(right, Math.sin(u * Math.PI * 2) * amp * phase),
+    );
   }
 }
 
+/** Corkscrew around a gently descending axis; the radius eases in and out so entry and exit stay smooth. */
 function addHelix(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
-  const length = rng.range(34, 56);
-  const r = rng.range(5.5, 10);
-  const turns = rng.range(1.15, 2.05);
-  const drop = rng.range(9, 18);
-  const steps = 18;
-  const right = orthonormalRight(dir);
-  const nrm = new THREE.Vector3().crossVectors(right, dir).normalize();
+  const axis = withPitch(dir, -rng.range(0.1, 0.22));
+  const length = rng.range(38, 58);
+  const r = rng.range(5, 8.5);
+  const turns = rng.range(1, 1.75);
+  const steps = 24;
+  const right = orthonormalRight(axis);
+  const nrm = new THREE.Vector3().crossVectors(right, axis).normalize();
   for (let i = 1; i <= steps; i++) {
     const u = i / steps;
     const ang = u * turns * Math.PI * 2;
-    const p = pos
-      .clone()
-      .addScaledVector(dir, u * length)
-      .addScaledVector(right, Math.cos(ang) * r - r)
-      .addScaledVector(nrm, Math.sin(ang) * r);
-    p.y -= u * drop;
-    points.push(p);
+    const rr = r * smoothstep(0, 0.22, u) * (1 - smoothstep(0.78, 1, u));
+    points.push(
+      pos
+        .clone()
+        .addScaledVector(axis, u * length)
+        .addScaledVector(right, (Math.cos(ang) - 1) * rr)
+        .addScaledVector(nrm, Math.sin(ang) * rr),
+    );
   }
 }
 
+/** Vertical loop tilted onto the entry tangent, so the tube flows straight into it. */
 function addLoop(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
-  const fwd = new THREE.Vector3(dir.x, 0, dir.z);
-  if (fwd.lengthSq() < 0.08) return;
-  fwd.normalize();
-  const radius = rng.range(11, 16);
-  const steps = 20;
-  // The loop's start and end run side by side; keep a tube diameter between them.
+  const n = UP.clone().addScaledVector(dir, -dir.y).normalize();
+  if (n.lengthSq() < 0.5) return;
+  const radius = rng.range(9, 11.5);
+  const steps = 22;
+  // Start and end run side by side; drift keeps a tube diameter between them.
   const drift = rng.range(0.36, 0.55);
-  const drop = rng.range(0.08, 0.16);
-  const up = new THREE.Vector3(0, 1, 0);
-  const center = pos.clone().addScaledVector(up, radius);
+  const settle = rng.range(0.06, 0.12);
+  const center = pos.clone().addScaledVector(n, radius);
   for (let i = 1; i <= steps; i++) {
     const theta = (i / steps) * Math.PI * 2;
-    const c = center
-      .clone()
-      .addScaledVector(fwd, i * drift)
-      .addScaledVector(up, -i * drop);
-    const p = c
-      .addScaledVector(up, -Math.cos(theta) * radius)
-      .addScaledVector(fwd, Math.sin(theta) * radius);
-    points.push(p);
+    points.push(
+      center
+        .clone()
+        .addScaledVector(dir, i * drift + Math.sin(theta) * radius)
+        .addScaledVector(n, -Math.cos(theta) * radius)
+        .addScaledVector(UP, -i * settle),
+    );
   }
 }
 
+/** Airtime hill with a sin² profile, so it leaves and rejoins the axis level. */
 function addHump(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
-  const length = rng.range(22, 38);
-  const height = rng.range(3.5, 7);
+  const axis = withPitch(dir, -rng.range(0.08, 0.18));
+  const length = rng.range(26, 40);
+  const height = rng.range(3, 6);
   const steps = 8;
   for (let i = 1; i <= steps; i++) {
     const u = i / steps;
-    const p = pos.clone().addScaledVector(dir, u * length);
-    p.y += Math.sin(u * Math.PI) * height - u * 2.6;
+    const p = pos.clone().addScaledVector(axis, u * length);
+    p.y += Math.sin(u * Math.PI) ** 2 * height;
     points.push(p);
   }
 }
@@ -229,6 +256,7 @@ function addSplash(points: THREE.Vector3[], rng: Rng): PoolData {
 const FEATURES: Feature[] = ["drop", "sweep", "s", "helix", "loop", "hump"];
 
 function runFeature(name: Feature, points: THREE.Vector3[], rng: Rng) {
+  levelOut(points, rng);
   switch (name) {
     case "drop":
       addDrop(points, rng);
@@ -252,18 +280,22 @@ function runFeature(name: Feature, points: THREE.Vector3[], rng: Rng) {
 }
 
 function pickFeatures(rng: Rng, first: boolean): Feature[] {
-  if (first) return ["drop", "sweep", "loop", "drop"];
+  if (first) return ["drop", "sweep", "drop", "loop", "s"];
   const count = rng.int(3, 5);
   const out: Feature[] = [];
   let last: Feature | null = null;
   for (let i = 0; i < count; i++) {
     let f = rng.pick(FEATURES);
-    if (f === last || (f === "loop" && last === "helix")) f = rng.pick(["drop", "sweep", "s"]);
+    if (f === last || (f === "loop" && last === "helix")) {
+      f = rng.pick(FEATURES.filter((x) => x !== last && x !== "loop"));
+    }
+    // A loop needs the speed of a drop straight into it.
+    if (f === "loop" && last !== "drop") out.push("drop");
     out.push(f);
     last = f;
   }
   if (!out.includes("drop")) out.unshift("drop");
-  return out;
+  return out.slice(0, 6);
 }
 
 function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exit[] {
