@@ -89,7 +89,7 @@ export function createWaterMaterial(palette: Palette): THREE.MeshStandardMateria
     roughness: 0.12,
     metalness: 0.28,
     emissive: new THREE.Color(palette.water),
-    emissiveIntensity: 0.22,
+    emissiveIntensity: 0.32,
     transparent: true,
     opacity: 0.9,
     side: THREE.DoubleSide,
@@ -106,14 +106,88 @@ export function createWallMaterial(palette: Palette): THREE.MeshStandardMaterial
   });
 }
 
-export function createAccentMaterial(palette: Palette): THREE.MeshStandardMaterial {
+/** Exit mouth: the tube material lit from inside so the hole reads from across the pool. */
+export function createMouthMaterial(palette: Palette): THREE.MeshStandardMaterial {
+  const mat = createTubeMaterial(palette);
+  mat.emissive = new THREE.Color(palette.accent);
+  mat.emissiveIntensity = 0.16;
+  return mat;
+}
+
+export function createExitRingMaterial(palette: Palette): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: palette.accent,
-    roughness: 0.3,
+    roughness: 0.25,
     metalness: 0.1,
     emissive: new THREE.Color(palette.accent),
-    emissiveIntensity: 0.55,
+    emissiveIntensity: 1.2,
   });
+}
+
+export function createCurrentMaterial(palette: Palette): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: palette.ring,
+    map: currentTexture(),
+    transparent: true,
+    opacity: 0.38,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+}
+
+export function createWakeMaterial(): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: 0xcfe9ee,
+    map: softDotTexture(),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+}
+
+let currentTex: THREE.CanvasTexture | null = null;
+
+/** Soft dashes along v, fading at the sides; scrolled toward a mouth it reads as surface current. */
+export function currentTexture(): THREE.CanvasTexture {
+  if (currentTex) return currentTex;
+  const w = 64;
+  const h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, w, h);
+  for (let i = 0; i < 3; i++) {
+    const y0 = i * (h / 3) + 10;
+    const g = ctx.createLinearGradient(0, y0, 0, y0 + 56);
+    g.addColorStop(0, "rgba(255,255,255,0)");
+    g.addColorStop(0.5, "rgba(255,255,255,0.9)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(14, y0, w - 28, 56);
+  }
+  ctx.globalCompositeOperation = "destination-in";
+  const side = ctx.createLinearGradient(0, 0, w, 0);
+  side.addColorStop(0, "rgba(0,0,0,0)");
+  side.addColorStop(0.5, "rgba(0,0,0,1)");
+  side.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = side;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  currentTex = tex;
+  return tex;
+}
+
+/** Advance the shared current texture so every strip flows toward its mouth. */
+export function scrollCurrents(dt: number) {
+  const tex = currentTexture();
+  tex.offset.y = (((tex.offset.y - dt * 0.42) % 1) + 1) % 1;
 }
 
 export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicMaterial {

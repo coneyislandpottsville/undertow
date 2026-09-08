@@ -8,7 +8,9 @@ import {
   type PathData,
 } from "./path";
 import {
-  createAccentMaterial,
+  createCurrentMaterial,
+  createExitRingMaterial,
+  createMouthMaterial,
   createRingMaterial,
   createTubeMaterial,
   createWallMaterial,
@@ -16,6 +18,7 @@ import {
   createWhirlMaterial,
   makeWhirlTexture,
   paletteAt,
+  scrollCurrents,
   type Palette,
 } from "./materials";
 
@@ -43,9 +46,12 @@ export type RideSection = {
   group: THREE.Group;
   whirl: THREE.Mesh;
   water: THREE.Mesh;
-  beacons: THREE.Mesh[];
+  /** Animate this section's exit cues; call once per frame for the section the rider is in. */
+  tick: (dt: number, elapsed: number) => void;
   dispose: () => void;
 };
+
+type ExitVisual = { ring: THREE.Mesh; light: THREE.PointLight; phase: number };
 
 type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
 
@@ -347,7 +353,20 @@ function addRings(group: THREE.Group, path: PathData, palette: Palette, geometri
   materials.push(mat);
 }
 
-function addMouth(group: THREE.Group, exit: Exit, radius: number, palette: Palette, geometries: THREE.BufferGeometry[], materials: THREE.Material[]) {
+/**
+ * An exit is a lit mouth in the pool wall: the tube itself glows from inside, a
+ * pulsing ring frames it, a light spills onto the water, and a strip of surface
+ * current runs from the middle of the pool straight into it.
+ */
+function addMouth(
+  group: THREE.Group,
+  exit: Exit,
+  pool: PoolData,
+  radius: number,
+  palette: Palette,
+  geometries: THREE.BufferGeometry[],
+  materials: THREE.Material[],
+): ExitVisual {
   const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
   const pts = [
     exit.position.clone().addScaledVector(outward, -2.2),
@@ -357,22 +376,58 @@ function addMouth(group: THREE.Group, exit: Exit, radius: number, palette: Palet
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  const mat = createTubeMaterial(palette);
+  const mat = createMouthMaterial(palette);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   group.add(mesh);
   geometries.push(geo);
   materials.push(mat);
 
-  const beaconGeo = new THREE.CylinderGeometry(0.16, 0.16, 5.5, 8);
-  const beaconMat = createAccentMaterial(palette);
-  const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-  beacon.position.copy(exit.position);
-  beacon.position.y += 2.4;
-  beacon.position.addScaledVector(outward, -0.6);
-  group.add(beacon);
-  geometries.push(beaconGeo);
-  materials.push(beaconMat);
+  const ringGeo = new THREE.TorusGeometry(radius + 0.3, 0.13, 8, 40);
+  const ringMat = createExitRingMaterial(palette);
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.copy(exit.position).addScaledVector(outward, -0.3);
+  ring.position.y += 0.25;
+  ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), outward);
+  group.add(ring);
+  geometries.push(ringGeo);
+  materials.push(ringMat);
+
+  const light = new THREE.PointLight(palette.accent, 2.4, 18, 1.5);
+  light.position.copy(exit.position).addScaledVector(outward, -1.2);
+  light.position.y += 1.5;
+  group.add(light);
+
+  const from = pool.center.clone().addScaledVector(outward, 3.5);
+  const to = pool.center.clone().addScaledVector(outward, pool.radius - 1.0);
+  const right = new THREE.Vector3(outward.z, 0, -outward.x);
+  const half = 0.9;
+  const y = pool.waterY + 0.07;
+  const stripGeo = new THREE.BufferGeometry();
+  stripGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(
+      new Float32Array([
+        from.x - right.x * half, y, from.z - right.z * half,
+        from.x + right.x * half, y, from.z + right.z * half,
+        to.x + right.x * half, y, to.z + right.z * half,
+        to.x - right.x * half, y, to.z - right.z * half,
+      ]),
+      3,
+    ),
+  );
+  const vRepeat = from.distanceTo(to) / 3.2;
+  stripGeo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, vRepeat, 0, vRepeat]), 2));
+  stripGeo.setIndex([0, 1, 2, 0, 2, 3]);
+  const stripMat = createCurrentMaterial(palette);
+  const strip = new THREE.Mesh(stripGeo, stripMat);
+  strip.renderOrder = 3;
+  strip.frustumCulled = false;
+  group.add(strip);
+  geometries.push(stripGeo);
+  materials.push(stripMat);
+
+  return { ring, light, phase: exit.index * 1.9 };
 }
 
 function assembleMeshes(
@@ -380,11 +435,11 @@ function assembleMeshes(
   pool: PoolData,
   exits: Exit[],
   palette: Palette,
-): Pick<RideSection, "group" | "whirl" | "water" | "beacons" | "dispose"> {
+): Pick<RideSection, "group" | "whirl" | "water" | "tick" | "dispose"> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
-  const beacons: THREE.Mesh[] = [];
+  const exitVisuals: ExitVisual[] = [];
 
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, 10, false);
@@ -447,12 +502,10 @@ function assembleMeshes(
   materials.push(floorMat);
 
   for (const exit of exits) {
-    addMouth(group, exit, path.radius, palette, geometries, materials);
-    const last = group.children[group.children.length - 1];
-    if (last instanceof THREE.Mesh) beacons.push(last);
+    exitVisuals.push(addMouth(group, exit, pool, path.radius, palette, geometries, materials));
   }
 
-  const light = new THREE.PointLight(palette.accent, 1.6, pool.radius * 3.2, 1.4);
+  const light = new THREE.PointLight(palette.accent, 2.4, pool.radius * 3.2, 1.3);
   light.position.copy(pool.center);
   light.position.y = pool.waterY + 3.5;
   group.add(light);
@@ -461,7 +514,14 @@ function assembleMeshes(
     group,
     whirl,
     water,
-    beacons,
+    tick: (dt, elapsed) => {
+      for (const v of exitVisuals) {
+        const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
+        (v.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
+        v.light.intensity = 1.6 + pulse * 1.6;
+      }
+      scrollCurrents(dt);
+    },
     dispose: () => {
       group.removeFromParent();
       for (const g of geometries) g.dispose();
