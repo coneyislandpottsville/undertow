@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+.vercel/
+.output/
+dist/
+.tanstack/
+.nitro/
+
+# sandbox state
+.grok/preview.log
+.grok/status
+.grok/og-pending
+.node_modules.lock
+
+# QA screenshots (regenerated every run)
+screenshots/*
+!screenshots/.gitkeep
+
+# env
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
