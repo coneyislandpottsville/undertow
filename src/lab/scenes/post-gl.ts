@@ -6,7 +6,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import type { LabParams, LabScene } from "../harness";
 import { createGlRenderer } from "../gl-renderer";
-import { streakCanvas } from "../textures";
+import { streakCanvas } from "@/game/textures";
 import {
   addLights,
   applyRideFov,

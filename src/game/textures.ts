@@ -1,15 +1,16 @@
 import { Rng } from "@/game/rng";
 
 /**
- * Canvas generators shared by node and classic prototypes. They return plain
- * canvases so each renderer wraps them with its own texture class; when the
- * seam is wired for real, materials.ts should move to this shape too.
+ * Canvas generators shared by the ride's materials and the /lab prototypes.
+ * They return plain canvases so each renderer wraps them with its own texture
+ * class. Seeded, so every session draws the same walls.
  */
 
 /**
- * Same drawing as streakTexture() in materials.ts: near-white base with
- * lengthwise streaks. `alongX` lays the streaks along the canvas x axis so a
- * TubeGeometry (u along the path) shows them running with the flow.
+ * Near-white base with soft lengthwise streaks and two faint seams per tile,
+ * so a palette colour still reads while the wall shows motion and distance.
+ * `alongX` lays the streaks along the canvas x axis so a TubeGeometry (u along
+ * the path) shows them running with the flow.
  */
 export function streakCanvas(alongX = false): HTMLCanvasElement {
   const rng = new Rng(7);

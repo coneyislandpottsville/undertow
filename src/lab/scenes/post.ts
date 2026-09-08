@@ -19,7 +19,7 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { Node } from "three/webgpu";
 import type { LabParams, LabScene } from "../harness";
 import { createNodeRenderer } from "../node-renderer";
-import { streakCanvas } from "../textures";
+import { streakCanvas } from "@/game/textures";
 import {
   addLights,
   applyRideFov,

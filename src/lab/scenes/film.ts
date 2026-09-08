@@ -19,7 +19,7 @@ import {
 import type { Node } from "three/webgpu";
 import type { LabParams, LabScene } from "../harness";
 import { createNodeRenderer } from "../node-renderer";
-import { rippleNormalCanvas, streakCanvas } from "../textures";
+import { rippleNormalCanvas, streakCanvas } from "@/game/textures";
 import {
   addLights,
   applyRideFov,

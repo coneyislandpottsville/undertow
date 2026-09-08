@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { LabParams, LabScene } from "../harness";
 import { createGlRenderer } from "../gl-renderer";
-import { rippleNormalCanvas, streakCanvas } from "../textures";
+import { rippleNormalCanvas, streakCanvas } from "@/game/textures";
 import {
   addLights,
   applyRideFov,

@@ -67,6 +67,8 @@ const result = await page.evaluate(
     const dctx = diff.getContext("2d");
     const dimg = dctx.createImageData(w, h);
     const sum = [0, 0, 0];
+    let lumA = 0;
+    let lumB = 0;
     let over = 0;
     let maxDiff = 0;
     const n = w * h;
@@ -74,6 +76,8 @@ const result = await page.evaluate(
       const o = i * 4;
       let m = 0;
       for (let c = 0; c < 3; c++) {
+        lumA += pa[o + c];
+        lumB += pb[o + c];
         const d = Math.abs(pa[o + c] - pb[o + c]);
         sum[c] += d;
         if (d > m) m = d;
@@ -89,6 +93,7 @@ const result = await page.evaluate(
       height: h,
       sizeMismatch: ia.width !== ib.width || ia.height !== ib.height,
       meanAbs: sum.map((s) => s / n),
+      meanLevel: [lumA / (n * 3), lumB / (n * 3)],
       overThreshold: over / n,
       maxDiff,
       png: diff.toDataURL("image/png"),
@@ -104,6 +109,8 @@ const summary = {
   b,
   size: `${result.width}x${result.height}${result.sizeMismatch ? " (size mismatch, compared the overlap)" : ""}`,
   meanAbs: result.meanAbs.map((v) => Number(v.toFixed(2))),
+  /** Mean of all channels for a and b, 0-255: a quick brightness check. */
+  meanLevel: result.meanLevel.map((v) => Number(v.toFixed(2))),
   overThreshold: Number((result.overThreshold * 100).toFixed(2)),
   threshold,
   maxDiff: result.maxDiff,
