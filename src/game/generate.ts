@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { forkSeed, Rng } from "./rng";
 import {
   buildPath,
@@ -522,7 +522,7 @@ function assembleMeshes(
       scrollTube(tubeMat, dt, speed);
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
-        (v.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
+        (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
         v.light.intensity = 1.6 + pulse * 1.6;
       }
       scrollCurrents(dt);

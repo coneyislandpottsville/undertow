@@ -42,8 +42,9 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 
 ## Where it stands (Build 2, September 2026)
 
-Stack: TanStack Start, React 19, Three.js r185 on WebGL2 (moving to
-`WebGPURenderer` in phase 4), zustand HUD, Tailwind v4. No auth, no database.
+Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
+materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
+it), zustand HUD, Tailwind v4. No auth, no database.
 Repository: github.com/coneyislandpottsville/undertow, PRs squash-merged to
 main.
 
@@ -114,8 +115,9 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
 - Renderer: Three.js `WebGPURenderer` with TSL node materials. Its built-in
   WebGL 2 backend is the fallback: same scene code, automatic when WebGPU is
   missing, `forceWebGL` for testing. Classic `WebGLRenderer` and GLSL retire.
-- Step 1: swap the import to `three/webgpu`, port materials.ts to node
-  materials, keep the ride pixel-equivalent. Gameplay code unchanged.
+- Step 1 (done in Build 3.1): `three/webgpu` import, materials.ts as node
+  materials, the ride pixel-equivalent on both backends. The ride publishes the
+  lab's `window.__lab` meter; numbers per step in `docs/research/ride-bench.md`.
 - Then, in product order: tube water film (speed at 40 m/s), bloom and radial
   blur (exit rings and current strips already assume it), whirlpool funnel
   (the tension moment), pool reflection and refraction with the compute height

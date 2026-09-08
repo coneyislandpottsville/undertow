@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { FrameMeter, type LabApi } from "@/lab/harness";
 import { RideAudio } from "./audio";
 import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
@@ -85,7 +86,15 @@ function vFovFromHorizontal(hDeg: number, aspect: number) {
 
 export class Game {
   private readonly canvas: HTMLCanvasElement;
-  private readonly renderer: THREE.WebGLRenderer;
+  private readonly renderer: THREE.WebGPURenderer;
+  /** Backend actually in use once the renderer has initialised. */
+  private backend: "webgpu" | "webgl" | "pending" = "pending";
+  private initialized = false;
+  /** GPU timestamp queries, on with `?gpu=1` for the bench; off otherwise, they cost a resolve per frame. */
+  private readonly gpuTiming: boolean;
+  private readonly meter = new FrameMeter();
+  /** Same shape as the lab prototypes publish, so scripts/lab-bench.mjs can measure the ride. */
+  private readonly api: LabApi;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly input = new Input();
@@ -96,7 +105,9 @@ export class Game {
   private readonly riderLight: THREE.PointLight;
   private readonly cavern: THREE.Mesh;
   private readonly floatie: THREE.Mesh;
-  private readonly spray: THREE.Points;
+  /** Instanced sprite: one quad per droplet, centred on `sprayAttr`. */
+  private readonly spray: THREE.Sprite;
+  private readonly sprayAttr: THREE.InstancedBufferAttribute;
   private readonly sprayVel: Float32Array;
   private readonly sprayAge: Float32Array;
   private sprayEmit = 0;
@@ -161,12 +172,36 @@ export class Game {
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.worldSeed = seedFromQuery();
 
-    this.renderer = new THREE.WebGLRenderer({
+    // WebGPU when the browser has it, the renderer's own WebGL 2 backend
+    // otherwise; ?backend=webgl forces the fallback for testing. The backend
+    // comes up asynchronously in start(); everything below is CPU-side setup.
+    const query = new URLSearchParams(window.location.search);
+    const forceWebGL = query.get("backend") === "webgl";
+    this.gpuTiming = query.has("gpu");
+    this.renderer = new THREE.WebGPURenderer({
       canvas,
       antialias: true,
-      powerPreference: "high-performance",
+      forceWebGL,
+      trackTimestamp: this.gpuTiming,
       alpha: false,
     });
+    this.api = {
+      ready: false,
+      error: null,
+      backend: forceWebGL ? "webgl" : "webgpu",
+      params: { backend: forceWebGL ? "webgl" : "webgpu", seed: this.worldSeed.toString(16) },
+      stats: () =>
+        this.meter.stats({
+          backend: this.backend,
+          w: canvas.width,
+          h: canvas.height,
+          drawCalls: this.renderer.info.render.drawCalls,
+          triangles: this.renderer.info.render.triangles,
+          extra: { mode: this.mode, speed: this.speed, drop: this.drop },
+        }),
+      reset: () => this.meter.reset(),
+    };
+    window.__lab = this.api;
     this.renderer.setClearColor(0x071318, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -190,14 +225,14 @@ export class Game {
     this.riderLight.position.set(0, 0.35, -1.1);
 
     const cavernGeo = new THREE.SphereGeometry(170, 24, 16);
-    const cavernMat = new THREE.MeshBasicMaterial({ color: 0x05090c, side: THREE.BackSide });
+    const cavernMat = new THREE.MeshBasicNodeMaterial({ color: 0x05090c, side: THREE.BackSide });
     this.cavern = new THREE.Mesh(cavernGeo, cavernMat);
     this.cavern.frustumCulled = false;
     this.scene.add(this.cavern);
 
     const floatGeo = new THREE.TorusGeometry(0.4, 0.09, 8, 22);
     floatGeo.rotateX(Math.PI / 2);
-    const floatMat = new THREE.MeshStandardMaterial({
+    const floatMat = new THREE.MeshStandardNodeMaterial({
       color: 0x1c2c32,
       roughness: 0.7,
       metalness: 0.05,
@@ -210,9 +245,9 @@ export class Game {
     this.sprayVel = new Float32Array(SPRAY_COUNT * 3);
     this.sprayAge = new Float32Array(SPRAY_COUNT).fill(-1);
     for (let i = 0; i < SPRAY_COUNT; i++) sprayPos[i * 3 + 1] = -1000;
-    const sprayGeo = new THREE.BufferGeometry();
-    sprayGeo.setAttribute("position", new THREE.BufferAttribute(sprayPos, 3));
-    this.spray = new THREE.Points(sprayGeo, createSprayMaterial());
+    this.sprayAttr = new THREE.InstancedBufferAttribute(sprayPos, 3);
+    this.spray = new THREE.Sprite(createSprayMaterial(this.sprayAttr));
+    this.spray.count = SPRAY_COUNT;
     this.spray.frustumCulled = false;
     this.scene.add(this.spray);
 
@@ -256,6 +291,7 @@ export class Game {
       getWhirl: () => ({ energy: this.whirlEnergy, r: this.whirlR }),
       getPosition: () => [this.px, this.py, this.pz],
       getSeed: () => this.worldSeed.toString(16),
+      getBackend: () => this.backend,
       release: () => this.focus(),
       setKeys: (codes) => this.input.setKeys(codes),
       setSteer: (v) => this.input.setSteer(v),
@@ -271,8 +307,28 @@ export class Game {
     });
   }
 
-  start() {
-    if (this.running) return;
+  /**
+   * Bring the backend up, then run. Rejects when neither WebGPU nor WebGL 2
+   * can be had, with the renderer's message; the view shows it in place of
+   * the canvas. A click during the wait still counts: the rider is released
+   * and starts moving on the first frame.
+   */
+  async start(): Promise<void> {
+    if (this.running || this.disposed) return;
+    try {
+      await this.renderer.init();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.api.error = message;
+      throw new Error(`Renderer failed to start: ${message}`);
+    }
+    if (this.disposed) return;
+    this.initialized = true;
+    const backendObj = this.renderer.backend as unknown as { isWebGPUBackend?: boolean };
+    this.backend = backendObj.isWebGPUBackend ? "webgpu" : "webgl";
+    this.api.backend = this.backend;
+    this.api.ready = true;
+    this.resize();
     this.running = true;
     this.clock.prev = performance.now();
     this.raf = requestAnimationFrame(this.loop);
@@ -290,8 +346,9 @@ export class Game {
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
     for (const quad of this.wake) (quad.material as THREE.Material).dispose();
-    this.renderer.dispose();
+    if (this.initialized) this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
+    if (window.__lab === this.api) delete window.__lab;
   }
 
   setTouch(code: string, held: boolean) {
@@ -364,6 +421,17 @@ export class Game {
     if (this.clock.acc > FIXED * 3) this.clock.acc = 0;
     this.present(dt);
     this.renderer.render(this.scene, this.camera);
+    this.meter.tick(dt);
+    if (this.gpuTiming) {
+      // Resolve every frame: the query pool is per pass and overflows if resolves are skipped.
+      void this.renderer
+        .resolveTimestampsAsync(THREE.TimestampQuery.RENDER)
+        .then(() => {
+          const ms = this.renderer.info.render.timestamp || 0;
+          if (ms > 0) this.meter.gpu(ms);
+        })
+        .catch(() => undefined);
+    }
   }
 
   private fixedUpdate(dt: number) {
@@ -517,7 +585,7 @@ export class Game {
     if (tight > 0.7 && e > 0.4) this.trauma = Math.max(this.trauma, 0.1 + tight * 0.15);
 
     this.current.whirl.rotation.z = -this.whirlAngle;
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicMaterial;
+    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
     whirlMat.opacity = 0.25 + e * 0.7;
     this.current.whirl.scale.setScalar(THREE.MathUtils.lerp(0.62, 1.05, e));
 
@@ -530,7 +598,7 @@ export class Game {
     this.mode = "paddle";
     this.swirl = 1.2 + spin * 0.9;
     this.speed = THREE.MathUtils.clamp(this.speed * 0.5, 2, 6);
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicMaterial;
+    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
     whirlMat.opacity = Math.min(whirlMat.opacity, 0.22);
     useHud.getState().patch({
       mode: "paddle",
@@ -608,7 +676,7 @@ export class Game {
     }
 
     this.eye.set(this.px, this.py + 0.58, this.pz);
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicMaterial;
+    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
     whirlMat.opacity = expDamp(whirlMat.opacity, 0.12, 1.2, dt);
     this.current.whirl.rotation.z -= dt * 0.15;
   }
@@ -829,13 +897,13 @@ export class Game {
       this.wakeAge[i] = age + dt;
       const u = (age + dt) / WAKE_LIFE;
       quad.scale.setScalar(1 + u * 1.8);
-      (quad.material as THREE.MeshBasicMaterial).opacity = 0.34 * (1 - u) * (1 - u);
+      (quad.material as THREE.MeshBasicNodeMaterial).opacity = 0.34 * (1 - u) * (1 - u);
     }
   }
 
   /** One-shot splash: throw spray up and out from the rider's position. */
   private burst(count: number) {
-    const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const positions = this.sprayAttr;
     const arr = positions.array as Float32Array;
     let spawned = 0;
     for (let i = 0; i < SPRAY_COUNT && spawned < count; i++) {
@@ -858,7 +926,7 @@ export class Game {
   }
 
   private updateSpray(dt: number) {
-    const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const positions = this.sprayAttr;
     const arr = positions.array as Float32Array;
     const emit = this.mode === "slide" && this.released && this.speed > 11;
     const cam = this.camera.position;
@@ -915,7 +983,7 @@ export class Game {
     }
     positions.needsUpdate = true;
     this.sprayBurst = expDamp(this.sprayBurst, 0, 1.6, dt);
-    const mat = this.spray.material as THREE.PointsMaterial;
+    const mat = this.spray.material as THREE.PointsNodeMaterial;
     const target = emit
       ? THREE.MathUtils.clamp((this.speed - 11) / 26, 0, 0.85)
       : this.sprayBurst > 0.03
@@ -938,6 +1006,8 @@ declare global {
       getWhirl?: () => { energy: number; r: number };
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
+      /** "webgpu" or "webgl" once the renderer is up, "pending" before. */
+      getBackend?: () => string;
       release?: () => void;
       setKeys?: (codes: string[]) => void;
       setSteer?: (v: number) => void;

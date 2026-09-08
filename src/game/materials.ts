@@ -1,20 +1,22 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { instancedDynamicBufferAttribute } from "three/tsl";
 import { Rng } from "./rng";
 
 /**
- * All ride materials live here so themed environments, TSL/WebGPU node
- * materials, animated maps, and video textures can swap in later without
- * touching movement or generation.
+ * All ride materials live here so themed environments, animated maps, and
+ * video textures can swap in later without touching movement or generation.
+ * Everything is a node material on WebGPURenderer (WebGL 2 backend as the
+ * fallback); the factory names are the seam generate.ts and game.ts build on.
  */
 export { PALETTES, paletteAt, type Palette } from "./palette";
 import type { Palette } from "./palette";
 
 /** Tube interior. `length` sizes the flow-streak texture so streaks stay a few metres long. */
-export function createTubeMaterial(palette: Palette, length = 12): THREE.MeshStandardMaterial {
+export function createTubeMaterial(palette: Palette, length = 12): THREE.MeshStandardNodeMaterial {
   const map = streakTexture().clone();
   map.repeat.set(2, Math.max(1, length / 5));
   map.needsUpdate = true;
-  return new THREE.MeshStandardMaterial({
+  return new THREE.MeshStandardNodeMaterial({
     color: palette.tube,
     map,
     roughness: 0.46,
@@ -26,7 +28,7 @@ export function createTubeMaterial(palette: Palette, length = 12): THREE.MeshSta
 
 /** Scroll the tube's streaks past the rider; call each frame for the section being ridden. */
 export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
-  const map = (mat as THREE.MeshStandardMaterial).map;
+  const map = (mat as THREE.MeshStandardNodeMaterial).map;
   if (!map) return;
   map.offset.y = (((map.offset.y + (speed * dt * 0.7) / 5) % 1) + 1) % 1;
 }
@@ -72,8 +74,8 @@ export function streakTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-export function createRingMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+export function createRingMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({
     color: palette.ring,
     roughness: 0.35,
     metalness: 0.15,
@@ -82,8 +84,8 @@ export function createRingMaterial(palette: Palette): THREE.MeshStandardMaterial
   });
 }
 
-export function createWaterMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({
     color: palette.water,
     roughness: 0.12,
     metalness: 0.28,
@@ -96,8 +98,8 @@ export function createWaterMaterial(palette: Palette): THREE.MeshStandardMateria
   });
 }
 
-export function createWallMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+export function createWallMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({
     color: palette.wall,
     roughness: 0.72,
     metalness: 0.04,
@@ -106,15 +108,15 @@ export function createWallMaterial(palette: Palette): THREE.MeshStandardMaterial
 }
 
 /** Exit mouth: the tube material lit from inside so the hole reads from across the pool. */
-export function createMouthMaterial(palette: Palette, length = 9): THREE.MeshStandardMaterial {
+export function createMouthMaterial(palette: Palette, length = 9): THREE.MeshStandardNodeMaterial {
   const mat = createTubeMaterial(palette, length);
   mat.emissive = new THREE.Color(palette.accent);
   mat.emissiveIntensity = 0.16;
   return mat;
 }
 
-export function createExitRingMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+export function createExitRingMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({
     color: palette.accent,
     roughness: 0.25,
     metalness: 0.1,
@@ -123,8 +125,8 @@ export function createExitRingMaterial(palette: Palette): THREE.MeshStandardMate
   });
 }
 
-export function createCurrentMaterial(palette: Palette): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({
+export function createCurrentMaterial(palette: Palette): THREE.MeshBasicNodeMaterial {
+  return new THREE.MeshBasicNodeMaterial({
     color: palette.ring,
     map: currentTexture(),
     transparent: true,
@@ -135,8 +137,8 @@ export function createCurrentMaterial(palette: Palette): THREE.MeshBasicMaterial
   });
 }
 
-export function createWakeMaterial(): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({
+export function createWakeMaterial(): THREE.MeshBasicNodeMaterial {
+  return new THREE.MeshBasicNodeMaterial({
     color: 0xcfe9ee,
     map: softDotTexture(),
     transparent: true,
@@ -189,8 +191,8 @@ export function scrollCurrents(dt: number) {
   tex.offset.y = (((tex.offset.y - dt * 0.42) % 1) + 1) % 1;
 }
 
-export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({
+export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicNodeMaterial {
+  return new THREE.MeshBasicNodeMaterial({
     map: texture,
     transparent: true,
     opacity: 0.92,
@@ -199,8 +201,13 @@ export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicMate
   });
 }
 
-export function createSprayMaterial(): THREE.PointsMaterial {
-  return new THREE.PointsMaterial({
+/**
+ * Spray droplets. WebGPU draws point primitives at one pixel, so the particles
+ * are an instanced Sprite whose centres come from `positions`; the material
+ * sizes them like PointsMaterial did (size in world units, attenuated).
+ */
+export function createSprayMaterial(positions: THREE.InstancedBufferAttribute): THREE.PointsNodeMaterial {
+  const mat = new THREE.PointsNodeMaterial({
     color: 0xdff4f8,
     map: softDotTexture(),
     size: 0.09,
@@ -210,6 +217,8 @@ export function createSprayMaterial(): THREE.PointsMaterial {
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
+  mat.positionNode = instancedDynamicBufferAttribute(positions);
+  return mat;
 }
 
 let softDot: THREE.CanvasTexture | null = null;

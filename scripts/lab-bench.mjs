@@ -42,7 +42,9 @@ const shots = args.shots ?? "";
 
 /** name, route, query, kind */
 const CASES = [
-  { name: "ride today (Build 2, WebGLRenderer)", path: "/", query: "", kind: "ride", backend: "glsl" },
+  // The ride publishes the same window.__lab meter as the prototypes; ?gpu=1 turns its timestamp queries on.
+  { name: "ride", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride", backend: "webgpu" },
+  { name: "ride", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride", backend: "webgl" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgpu", backend: "webgpu" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgl", backend: "webgl" },
   { name: "pool analytic", path: "/lab/pool", query: "backend=webgpu&sim=analytic", backend: "webgpu" },
@@ -132,26 +134,16 @@ for (const c of cases) {
     const errorsBefore = consoleErrors.length;
     const row = { name: c.name, backend: c.backend, res: r.label, w: r.w, h: r.h, url };
     try {
-      await page.goto(c.kind === "ride" ? `${base}${c.path}` : url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
       if (c.kind === "ride") {
+        // Release the rider and hold W so the sample covers the tube at speed.
         await page.waitForFunction(() => Boolean(window.__controlsTest), null, { timeout: 30000 });
         await page.evaluate(() => {
           window.__controlsTest.release?.();
           window.__controlsTest.setKeys?.(["KeyW"]);
-          window.__rafCount = 0;
-          const tick = () => {
-            window.__rafCount++;
-            requestAnimationFrame(tick);
-          };
-          requestAnimationFrame(tick);
         });
-        await sleep(warm * 1000);
-        const start = await page.evaluate(() => ({ n: window.__rafCount, t: performance.now() }));
-        await sleep(seconds * 1000);
-        const end = await page.evaluate(() => ({ n: window.__rafCount, t: performance.now() }));
-        const fps = ((end.n - start.n) * 1000) / (end.t - start.t);
-        Object.assign(row, { fps, frameMs: 1000 / fps, gpuMs: null, actualBackend: "glsl" });
-      } else {
+      }
+      {
         await page.waitForFunction(
           () => Boolean(window.__lab && (window.__lab.ready || window.__lab.error)),
           null,
