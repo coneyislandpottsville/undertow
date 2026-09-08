@@ -42,9 +42,10 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 
 ## Where it stands (Build 2, September 2026)
 
-Stack: TanStack Start, React 19, Three.js r185 on WebGL2, zustand HUD,
-Tailwind v4. No auth, no database. Repository:
-github.com/coneyislandpottsville/undertow, PRs squash-merged to main.
+Stack: TanStack Start, React 19, Three.js r185 on WebGL2 (moving to
+`WebGPURenderer` in phase 4), zustand HUD, Tailwind v4. No auth, no database.
+Repository: github.com/coneyislandpottsville/undertow, PRs squash-merged to
+main.
 
 Done in the POC: the full loop across repeated drops; fixed-step simulation;
 rotation-minimizing tube frames; six feature types; lazy section generation
@@ -101,14 +102,28 @@ Open:
   textures, chosen per section.
 - Cross-fade themes at exits. Author four to six distinct themes.
 - The tube interior doubles as a screen for art and video.
+- Sequencing: switch the renderer (phase 4, step 1) before authoring themes, so
+  every theme is written once as node materials instead of GLSL first and TSL
+  later.
 
-### 4. Rendering upgrade
+### 4. Rendering upgrade (path decided 2026-09-08)
 
-- Evaluate WebGPU (Three.js `WebGPURenderer`, node materials) with a WebGL2
-  fallback.
-- Post-processing: bloom, motion blur, water refraction. Hold 60 fps at
-  3440×1440 on a mid-range GPU.
-- Gameplay code unchanged.
+Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
+`/lab` (unlisted), bench via `node scripts/lab-bench.mjs`.
+
+- Renderer: Three.js `WebGPURenderer` with TSL node materials. Its built-in
+  WebGL 2 backend is the fallback: same scene code, automatic when WebGPU is
+  missing, `forceWebGL` for testing. Classic `WebGLRenderer` and GLSL retire.
+- Step 1: swap the import to `three/webgpu`, port materials.ts to node
+  materials, keep the ride pixel-equivalent. Gameplay code unchanged.
+- Then, in product order: tube water film (speed at 40 m/s), bloom and radial
+  blur (exit rings and current strips already assume it), whirlpool funnel
+  (the tension moment), pool reflection and refraction with the compute height
+  field, spray and mist.
+- Budget: 60 fps at 3440×1440 on an RTX 2060 class GPU with everything on;
+  measured costs in `docs/research/water-bench.md`. Fallback tier on WebGL 2:
+  analytic ripples instead of the height field, fewer particles, half-res
+  bloom.
 
 ### 5. Mobile
 
