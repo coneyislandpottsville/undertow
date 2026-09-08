@@ -1,0 +1,832 @@
+{
+  "date": "2026-09-08T20:49:30.283Z",
+  "browser": {
+    "channel": "chrome",
+    "version": "152.0.7977.76"
+  },
+  "gpu": {
+    "webgpu": {
+      "vendor": "nvidia",
+      "architecture": "turing",
+      "device": "",
+      "description": "",
+      "features": [
+        "bgra8unorm-storage",
+        "chromium-experimental-multi-draw-indirect",
+        "chromium-experimental-sampling-resource-table",
+        "chromium-experimental-timestamp-query-inside-passes",
+        "clip-distances",
+        "core-features-and-limits",
+        "depth-clip-control",
+        "depth32float-stencil8",
+        "dual-source-blending",
+        "float32-blendable",
+        "float32-filterable",
+        "indirect-first-instance",
+        "primitive-index",
+        "rg11b10ufloat-renderable",
+        "shader-f16",
+        "subgroup-size-control",
+        "subgroups",
+        "texture-component-swizzle",
+        "texture-compression-bc",
+        "texture-compression-bc-sliced-3d",
+        "texture-compression-unaligned",
+        "texture-formats-tier1",
+        "texture-formats-tier2",
+        "timestamp-query"
+      ],
+      "compatibility": false
+    },
+    "webgl": {
+      "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 (0x00001F03) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "timerQuery": true
+    }
+  },
+  "flags": [
+    "--disable-gpu-vsync",
+    "--disable-frame-rate-limit",
+    "--enable-unsafe-webgpu",
+    "--ignore-gpu-blocklist"
+  ],
+  "seconds": 6,
+  "warm": 2.5,
+  "rows": [
+    {
+      "name": "ride today (Build 2, WebGLRenderer)",
+      "backend": "glsl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/?res=2560x1080",
+      "fps": 1322.1722472097285,
+      "frameMs": 0.7563311074713367,
+      "gpuMs": null,
+      "actualBackend": "glsl",
+      "console": []
+    },
+    {
+      "name": "ride today (Build 2, WebGLRenderer)",
+      "backend": "glsl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/?res=3440x1440",
+      "fps": 785.4466738822746,
+      "frameMs": 1.2731609073563706,
+      "gpuMs": null,
+      "actualBackend": "glsl",
+      "console": []
+    },
+    {
+      "name": "whirlpool",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/whirlpool?backend=webgpu&res=2560x1080",
+      "fps": 840.1543887668684,
+      "frameMs": 1.1902574257425997,
+      "gpuMs": 0.9228776807920936,
+      "drawCalls": 5,
+      "triangles": 42753,
+      "actualBackend": "webgpu",
+      "extra": {
+        "energy": 0.72
+      },
+      "console": []
+    },
+    {
+      "name": "whirlpool",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/whirlpool?backend=webgpu&res=3440x1440",
+      "fps": 508.8668720339715,
+      "frameMs": 1.9651505235601991,
+      "gpuMs": 1.5321907120418525,
+      "drawCalls": 5,
+      "triangles": 42753,
+      "actualBackend": "webgpu",
+      "extra": {
+        "energy": 0.77
+      },
+      "console": []
+    },
+    {
+      "name": "whirlpool",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/whirlpool?backend=webgl&res=2560x1080",
+      "fps": 883.0036764094199,
+      "frameMs": 1.132498116051255,
+      "gpuMs": 1.1417584385833592,
+      "drawCalls": 5,
+      "triangles": 42753,
+      "actualBackend": "webgl",
+      "extra": {
+        "energy": 0.78
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "whirlpool",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/whirlpool?backend=webgl&res=3440x1440",
+      "fps": 751.5702126961719,
+      "frameMs": 1.3305476761946362,
+      "gpuMs": 2.098089824132612,
+      "drawCalls": 5,
+      "triangles": 42753,
+      "actualBackend": "webgl",
+      "extra": {
+        "energy": 0.88
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "pool analytic",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgpu&sim=analytic&res=2560x1080",
+      "fps": 819.7566508558423,
+      "frameMs": 1.2198742138364844,
+      "gpuMs": null,
+      "drawCalls": 11,
+      "triangles": 24177,
+      "actualBackend": "webgpu",
+      "extra": {
+        "sim": "analytic",
+        "grid": 0,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": []
+    },
+    {
+      "name": "pool analytic",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgpu&sim=analytic&res=3440x1440",
+      "fps": 257.8330066119549,
+      "frameMs": 3.878479381443296,
+      "gpuMs": 1.1444743917525866,
+      "drawCalls": 11,
+      "triangles": 24177,
+      "actualBackend": "webgpu",
+      "extra": {
+        "sim": "analytic",
+        "grid": 0,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": []
+    },
+    {
+      "name": "pool analytic",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgl&sim=analytic&res=2560x1080",
+      "fps": 543.404021389653,
+      "frameMs": 1.840251379521795,
+      "gpuMs": 1.8953426364193404,
+      "drawCalls": 11,
+      "triangles": 24177,
+      "actualBackend": "webgl",
+      "extra": {
+        "sim": "analytic",
+        "grid": 0,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "pool analytic",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgl&sim=analytic&res=3440x1440",
+      "fps": 387.93749063857365,
+      "frameMs": 2.5777348777348803,
+      "gpuMs": 3.2058615049336296,
+      "drawCalls": 11,
+      "triangles": 24177,
+      "actualBackend": "webgl",
+      "extra": {
+        "sim": "analytic",
+        "grid": 0,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "pool compute",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgpu&sim=compute&res=2560x1080",
+      "fps": 425.3689084307658,
+      "frameMs": 2.3509005481597454,
+      "gpuMs": 0.748733606891131,
+      "drawCalls": 11,
+      "triangles": 78707,
+      "actualBackend": "webgpu",
+      "extra": {
+        "sim": "compute",
+        "grid": 192,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": []
+    },
+    {
+      "name": "pool compute",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgpu&sim=compute&res=3440x1440",
+      "fps": 217.74180143942414,
+      "frameMs": 4.592595419847302,
+      "gpuMs": 1.9276139236641252,
+      "drawCalls": 11,
+      "triangles": 78707,
+      "actualBackend": "webgpu",
+      "extra": {
+        "sim": "compute",
+        "grid": 192,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": []
+    },
+    {
+      "name": "pool compute",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgl&sim=compute&res=2560x1080",
+      "fps": 497.27418847039246,
+      "frameMs": 2.010963012329243,
+      "gpuMs": 2.1553945591469414,
+      "drawCalls": 11,
+      "triangles": 78707,
+      "actualBackend": "webgl",
+      "extra": {
+        "sim": "compute",
+        "grid": 192,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "pool compute",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/pool?backend=webgl&sim=compute&res=3440x1440",
+      "fps": 388.0425880425859,
+      "frameMs": 2.5770367243562826,
+      "gpuMs": 3.5819292528493283,
+      "drawCalls": 11,
+      "triangles": 78707,
+      "actualBackend": "webgl",
+      "extra": {
+        "sim": "compute",
+        "grid": 192,
+        "reflect": 0.5,
+        "refract": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "film",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/film?backend=webgpu&res=2560x1080",
+      "fps": 826.3265679891999,
+      "frameMs": 1.2101752971992907,
+      "gpuMs": 0.9235182849083019,
+      "drawCalls": 2,
+      "triangles": 40321,
+      "actualBackend": "webgpu",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": []
+    },
+    {
+      "name": "film",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/film?backend=webgpu&res=3440x1440",
+      "fps": 492.4601393253192,
+      "frameMs": 2.0306212018906162,
+      "gpuMs": 1.5852343659688786,
+      "drawCalls": 2,
+      "triangles": 40321,
+      "actualBackend": "webgpu",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": []
+    },
+    {
+      "name": "film",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/film?backend=webgl&res=2560x1080",
+      "fps": 1083.6150477110261,
+      "frameMs": 0.9228369448286544,
+      "gpuMs": 1.0355531212539308,
+      "drawCalls": 2,
+      "triangles": 40321,
+      "actualBackend": "webgl",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "film",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/film?backend=webgl&res=3440x1440",
+      "fps": 810.6859396399434,
+      "frameMs": 1.2335233055159909,
+      "gpuMs": 1.6946439959291402,
+      "drawCalls": 2,
+      "triangles": 40321,
+      "actualBackend": "webgl",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "film",
+      "backend": "glsl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/film?backend=glsl&res=2560x1080",
+      "fps": 1740.9196636249496,
+      "frameMs": 0.5744090441932261,
+      "gpuMs": 0.6216981523351813,
+      "drawCalls": 1,
+      "triangles": 40320,
+      "actualBackend": "glsl",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": []
+    },
+    {
+      "name": "film",
+      "backend": "glsl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/film?backend=glsl&res=3440x1440",
+      "fps": 1723.779082732497,
+      "frameMs": 0.5801207416990011,
+      "gpuMs": 1.0462721885869692,
+      "drawCalls": 1,
+      "triangles": 40320,
+      "actualBackend": "glsl",
+      "extra": {
+        "speed": 40,
+        "flow": 6
+      },
+      "console": []
+    },
+    {
+      "name": "spray 50k",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgpu&res=2560x1080",
+      "fps": 381.8687263829023,
+      "frameMs": 2.6187009590235295,
+      "gpuMs": 1.5420832083696816,
+      "drawCalls": 7,
+      "triangles": 102449,
+      "actualBackend": "webgpu",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": []
+    },
+    {
+      "name": "spray 50k",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgpu&res=3440x1440",
+      "fps": 216.4264698548857,
+      "frameMs": 4.620506912442372,
+      "gpuMs": 2.782084645161246,
+      "drawCalls": 7,
+      "triangles": 102449,
+      "actualBackend": "webgpu",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": []
+    },
+    {
+      "name": "spray 50k",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgl&res=2560x1080",
+      "fps": 553.9820059979874,
+      "frameMs": 1.8051127819549306,
+      "gpuMs": 1.792486323007462,
+      "drawCalls": 7,
+      "triangles": 102449,
+      "actualBackend": "webgl",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "spray 50k",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgl&res=3440x1440",
+      "fps": 449.8860113824615,
+      "frameMs": 2.2227852716004324,
+      "gpuMs": 2.9256785359095656,
+      "drawCalls": 7,
+      "triangles": 102449,
+      "actualBackend": "webgl",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "spray 50k",
+      "backend": "glsl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=glsl&res=2560x1080",
+      "fps": 799.9068715492392,
+      "frameMs": 1.25014553014556,
+      "gpuMs": 1.1371962145530126,
+      "drawCalls": 10,
+      "triangles": 4704,
+      "actualBackend": "glsl",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35,
+        "frame": 6802
+      },
+      "console": []
+    },
+    {
+      "name": "spray 50k",
+      "backend": "glsl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=glsl&res=3440x1440",
+      "fps": 484.7518966747943,
+      "frameMs": 2.062910958904139,
+      "gpuMs": 1.9207838794520555,
+      "drawCalls": 10,
+      "triangles": 4704,
+      "actualBackend": "glsl",
+      "extra": {
+        "particles": 50000,
+        "mist": 48,
+        "soft": 0.35,
+        "frame": 4177
+      },
+      "console": []
+    },
+    {
+      "name": "spray 200k",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgpu&n=200000&res=2560x1080",
+      "fps": 269.8156259889064,
+      "frameMs": 3.7062345679012507,
+      "gpuMs": 2.597492958024754,
+      "drawCalls": 7,
+      "triangles": 402449,
+      "actualBackend": "webgpu",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": []
+    },
+    {
+      "name": "spray 200k",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgpu&n=200000&res=3440x1440",
+      "fps": 154.83634912187387,
+      "frameMs": 6.458431793770117,
+      "gpuMs": 4.510383364124503,
+      "drawCalls": 7,
+      "triangles": 402449,
+      "actualBackend": "webgpu",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": []
+    },
+    {
+      "name": "spray 200k",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgl&n=200000&res=2560x1080",
+      "fps": 442.4503430545766,
+      "frameMs": 2.260140636565512,
+      "gpuMs": 2.9857648675056985,
+      "drawCalls": 7,
+      "triangles": 402449,
+      "actualBackend": "webgl",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "spray 200k",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=webgl&n=200000&res=3440x1440",
+      "fps": 331.2833128331312,
+      "frameMs": 3.018564356435617,
+      "gpuMs": 4.740353441584285,
+      "drawCalls": 7,
+      "triangles": 402449,
+      "actualBackend": "webgl",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "spray 200k",
+      "backend": "glsl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=glsl&n=200000&res=2560x1080",
+      "fps": 360.58811788969035,
+      "frameMs": 2.773247232472358,
+      "gpuMs": 1.673413446494465,
+      "drawCalls": 10,
+      "triangles": 4704,
+      "actualBackend": "glsl",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35,
+        "frame": 3058
+      },
+      "console": []
+    },
+    {
+      "name": "spray 200k",
+      "backend": "glsl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/spray?backend=glsl&n=200000&res=3440x1440",
+      "fps": 334.1816790591662,
+      "frameMs": 2.9923842707814994,
+      "gpuMs": 2.6517033031358856,
+      "drawCalls": 10,
+      "triangles": 4704,
+      "actualBackend": "glsl",
+      "extra": {
+        "particles": 200000,
+        "mist": 48,
+        "soft": 0.35,
+        "frame": 2828
+      },
+      "console": []
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "webgpu",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/post?backend=webgpu&res=2560x1080",
+      "fps": 376.95046079116065,
+      "frameMs": 2.652868490732588,
+      "gpuMs": 1.7514646566637195,
+      "drawCalls": 17,
+      "triangles": 35854,
+      "actualBackend": "webgpu",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": true
+      },
+      "console": [
+        "warning: THREE.WebGPUTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "webgpu",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/post?backend=webgpu&res=3440x1440",
+      "fps": 222.38127736072107,
+      "frameMs": 4.496781437125735,
+      "gpuMs": 3.062490227544892,
+      "drawCalls": 17,
+      "triangles": 35854,
+      "actualBackend": "webgpu",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": true
+      },
+      "console": [
+        "warning: THREE.WebGPUTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "webgl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/post?backend=webgl&res=2560x1080",
+      "fps": 349.96252186224484,
+      "frameMs": 2.8574488338886423,
+      "gpuMs": 2.6899122779628915,
+      "drawCalls": 17,
+      "triangles": 35854,
+      "actualBackend": "webgl",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "webgl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/post?backend=webgl&res=3440x1440",
+      "fps": 211.4516907810405,
+      "frameMs": 4.729212598425169,
+      "gpuMs": 4.5485108661417515,
+      "drawCalls": 17,
+      "triangles": 35854,
+      "actualBackend": "webgl",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": true
+      },
+      "console": [
+        "warning: THREE.WebGLTimestampQueryPool [render]: Maximum number of queries exceeded, when using trackTimestamp it is necessary to resolves the queries via renderer.resolveTimestampsAsync( THREE.TimestampQuery.RENDER )."
+      ]
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "glsl",
+      "res": "2560×1080",
+      "w": 2560,
+      "h": 1080,
+      "url": "http://127.0.0.1:8080/lab/post?backend=glsl&res=2560x1080",
+      "fps": 545.8664401246017,
+      "frameMs": 1.8319499542264146,
+      "gpuMs": 1.7158475093072494,
+      "drawCalls": 19,
+      "triangles": 36495,
+      "actualBackend": "glsl",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": false
+      },
+      "console": []
+    },
+    {
+      "name": "post bloom+blur",
+      "backend": "glsl",
+      "res": "3440×1440",
+      "w": 3440,
+      "h": 1440,
+      "url": "http://127.0.0.1:8080/lab/post?backend=glsl&res=3440x1440",
+      "fps": 427.23108621247655,
+      "frameMs": 2.340653646871253,
+      "gpuMs": 3.077590179354309,
+      "drawCalls": 20,
+      "triangles": 37135,
+      "actualBackend": "glsl",
+      "extra": {
+        "bloom": true,
+        "blur": true,
+        "mrt": false
+      },
+      "console": []
+    }
+  ]
+}
