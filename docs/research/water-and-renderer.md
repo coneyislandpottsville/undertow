@@ -39,10 +39,11 @@ If `requestAdapter()` fails, `Renderer.init()` swaps in `WebGLBackend` with a co
 `forceWebGL: true` selects it deliberately. Nothing the prototypes use disappears: node materials,
 MRT for emissive bloom, `viewportSharedTexture` refraction, `viewportDepthTexture` soft particles,
 the `reflector` node, and compute all ran. What shrinks: compute becomes transform feedback (one
-dispatch count, at most four written buffers per kernel on this driver, neighbour reads via a texture
-copy, no atomics, no workgroup memory, no storage textures), MSAA is off in compatibility mode, and
-GPU timing needs `EXT_disjoint_timer_query_webgl2`. Chrome ignores `powerPreference` on Windows
-(crbug 369219127) under both APIs.
+dispatch count; a kernel writing four buffers failed here with "too many varyings" while two per
+kernel works; neighbour reads go through a texture copy; no atomics, workgroup memory, or storage
+textures), MSAA is off in compatibility mode, and GPU timing needs
+`EXT_disjoint_timer_query_webgl2`. Chrome ignores `powerPreference` for WebGPU adapters on Windows
+(crbug 369219127), so dual-GPU laptops may land on the integrated GPU.
 
 ## The four surfaces, one prototype each (same TSL code on both backends)
 
