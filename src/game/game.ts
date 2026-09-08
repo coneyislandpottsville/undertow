@@ -100,6 +100,12 @@ export class Game {
   private readonly sprayVel: Float32Array;
   private readonly sprayAge: Float32Array;
   private sprayEmit = 0;
+  /** Fades after a splash so burst particles stay visible outside the tube. */
+  private sprayBurst = 0;
+  /** Extra vertical FOV, degrees, punched on exit and decaying. */
+  private fovPunch = 0;
+  private strokeTimer = 0;
+  private whirlSpin = 0;
   /** Unit vector from the tube axis to the rider's seat on the wall. */
   private readonly radial = new THREE.Vector3();
   private readonly reducedMotion: boolean;
@@ -331,8 +337,8 @@ export class Game {
   private applyFov() {
     const aspect = this.camera.aspect || 1;
     const hFov = aspect >= 2.1 ? 110 : aspect >= 1.8 ? 102 : aspect >= 1.5 ? 94 : 88;
-    const speedKick = (this.speed / MAX_SPEED) * (this.reducedMotion ? 2 : 8);
-    this.camera.fov = vFovFromHorizontal(hFov, aspect) + speedKick;
+    const speedKick = (Math.abs(this.speed) / MAX_SPEED) * (this.reducedMotion ? 2 : 10);
+    this.camera.fov = vFovFromHorizontal(hFov, aspect) + speedKick + this.fovPunch;
     this.camera.updateProjectionMatrix();
   }
 
@@ -469,6 +475,8 @@ export class Game {
     this.trauma = Math.max(this.trauma, 0.55);
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
+    this.audio.splash();
+    this.burst(70);
     useHud.getState().patch({
       mode: "whirl",
       hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
@@ -497,6 +505,7 @@ export class Game {
     this.whirlR = THREE.MathUtils.clamp(this.whirlR + (pull - steer * WHIRL_LEAN) * dt, WHIRL_INNER, outerR);
 
     const spin = (1.9 + tight * 1.7) * (0.3 + 0.7 * e);
+    this.whirlSpin = spin;
     this.whirlAngle += spin * dt;
     this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
     this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
@@ -534,6 +543,11 @@ export class Game {
     const steer = this.input.getSteer();
     const throttle = this.input.getThrottle();
     const speedFactor = THREE.MathUtils.clamp(0.5 + Math.abs(this.speed) / 7, 0.5, 1.15);
+    this.strokeTimer -= dt;
+    if (Math.abs(throttle) > 0.3 && this.strokeTimer <= 0) {
+      this.strokeTimer = 0.55;
+      this.audio.stroke();
+    }
     const reverse = this.speed >= 0 ? 1 : -1;
     this.yaw += steer * POOL_TURN * speedFactor * reverse * dt;
     this.heading = this.yaw;
@@ -660,6 +674,8 @@ export class Game {
     this.sink = 0;
     this.drop += 1;
     this.trauma = Math.max(this.trauma, 0.28);
+    this.fovPunch = 12;
+    this.audio.whoosh();
     // Refresh the frame now so the very next render aims down the new tube,
     // not along the previous section's stale tangent.
     samplePath(next.path, this.dist, _frame);
@@ -687,13 +703,14 @@ export class Game {
   }
 
   private present(dt: number) {
+    this.fovPunch = expDamp(this.fovPunch, 0, 4, dt);
     this.applyFov();
     this.updateCamera(dt);
     this.cavern.position.copy(this.camera.position);
-    this.current.tick(dt, this.clock.elapsed);
+    this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
     this.updateSpray(dt);
     this.updateWake(dt);
-    this.audio.update(this.speed, this.mode);
+    this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);
 
     this.hudTick += dt;
     if (this.hudTick > 0.08) {
@@ -703,6 +720,7 @@ export class Game {
         speed: this.speed,
         mode: this.mode,
         depth,
+        g: this.mode === "slide" ? this.press / GRAVITY : 1,
       });
     }
   }
@@ -815,6 +833,30 @@ export class Game {
     }
   }
 
+  /** One-shot splash: throw spray up and out from the rider's position. */
+  private burst(count: number) {
+    const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const arr = positions.array as Float32Array;
+    let spawned = 0;
+    for (let i = 0; i < SPRAY_COUNT && spawned < count; i++) {
+      if (this.sprayAge[i]! >= 0) continue;
+      const i3 = i * 3;
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.4 + Math.random() * 1.4;
+      arr[i3] = this.px + Math.cos(a) * r;
+      arr[i3 + 1] = this.py - 0.3;
+      arr[i3 + 2] = this.pz + Math.sin(a) * r;
+      const out = 2 + Math.random() * 5;
+      this.sprayVel[i3] = Math.cos(a) * out;
+      this.sprayVel[i3 + 1] = 2.5 + Math.random() * 5;
+      this.sprayVel[i3 + 2] = Math.sin(a) * out;
+      this.sprayAge[i] = 0;
+      spawned++;
+    }
+    positions.needsUpdate = true;
+    this.sprayBurst = 1;
+  }
+
   private updateSpray(dt: number) {
     const positions = this.spray.geometry.getAttribute("position") as THREE.BufferAttribute;
     const arr = positions.array as Float32Array;
@@ -872,8 +914,13 @@ export class Game {
       this.sprayAge[i] = 0;
     }
     positions.needsUpdate = true;
+    this.sprayBurst = expDamp(this.sprayBurst, 0, 1.6, dt);
     const mat = this.spray.material as THREE.PointsMaterial;
-    const target = emit ? THREE.MathUtils.clamp((this.speed - 11) / 26, 0, 0.85) : 0;
+    const target = emit
+      ? THREE.MathUtils.clamp((this.speed - 11) / 26, 0, 0.85)
+      : this.sprayBurst > 0.03
+        ? 0.75 * this.sprayBurst
+        : 0;
     mat.opacity = expDamp(mat.opacity, target, 6, dt);
   }
 }

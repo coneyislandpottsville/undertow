@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Rng } from "./rng";
 
 /**
  * All ride materials live here so themed environments, TSL/WebGPU node
@@ -63,14 +64,67 @@ export function paletteAt(index: number): Palette {
   return PALETTES[((index % PALETTES.length) + PALETTES.length) % PALETTES.length]!;
 }
 
-export function createTubeMaterial(palette: Palette): THREE.MeshStandardMaterial {
+/** Tube interior. `length` sizes the flow-streak texture so streaks stay a few metres long. */
+export function createTubeMaterial(palette: Palette, length = 12): THREE.MeshStandardMaterial {
+  const map = streakTexture().clone();
+  map.repeat.set(2, Math.max(1, length / 5));
+  map.needsUpdate = true;
   return new THREE.MeshStandardMaterial({
     color: palette.tube,
+    map,
     roughness: 0.46,
     metalness: 0.08,
     side: THREE.BackSide,
     envMapIntensity: 0.35,
   });
+}
+
+/** Scroll the tube's streaks past the rider; call each frame for the section being ridden. */
+export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
+  const map = (mat as THREE.MeshStandardMaterial).map;
+  if (!map) return;
+  map.offset.y = (((map.offset.y + (speed * dt * 0.7) / 5) % 1) + 1) % 1;
+}
+
+let streakTex: THREE.CanvasTexture | null = null;
+
+/**
+ * Near-white base with soft lengthwise streaks and two faint seams per tile, so
+ * the palette colour still reads while the wall shows motion and distance.
+ * Seeded, so every session draws the same wall.
+ */
+export function streakTexture(): THREE.CanvasTexture {
+  if (streakTex) return streakTex;
+  const rng = new Rng(7);
+  const w = 256;
+  const h = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#e4e4e4";
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 70; i++) {
+    const x = rng.float() * w;
+    const y = rng.float() * h;
+    const len = 60 + rng.float() * 220;
+    const light = rng.chance(0.5);
+    const c = light ? "255,255,255" : "110,122,128";
+    const g = ctx.createLinearGradient(0, y, 0, y + len);
+    g.addColorStop(0, `rgba(${c},0)`);
+    g.addColorStop(0.5, `rgba(${c},${light ? 0.4 : 0.32})`);
+    g.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, 2 + rng.float() * 4, len);
+  }
+  ctx.fillStyle = "rgba(90,100,105,0.35)";
+  for (let i = 0; i < 2; i++) ctx.fillRect(0, (i + 0.5) * (h / 2) - 2, w, 4);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  streakTex = tex;
+  return tex;
 }
 
 export function createRingMaterial(palette: Palette): THREE.MeshStandardMaterial {
@@ -107,8 +161,8 @@ export function createWallMaterial(palette: Palette): THREE.MeshStandardMaterial
 }
 
 /** Exit mouth: the tube material lit from inside so the hole reads from across the pool. */
-export function createMouthMaterial(palette: Palette): THREE.MeshStandardMaterial {
-  const mat = createTubeMaterial(palette);
+export function createMouthMaterial(palette: Palette, length = 9): THREE.MeshStandardMaterial {
+  const mat = createTubeMaterial(palette, length);
   mat.emissive = new THREE.Color(palette.accent);
   mat.emissiveIntensity = 0.16;
   return mat;

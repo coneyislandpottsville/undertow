@@ -9,6 +9,8 @@ export type HudState = {
   mode: RideMode;
   drop: number;
   depth: number;
+  /** Apparent g pressing the rider into the wall; below zero is airtime. */
+  g: number;
   hint: string;
   exits: number;
   seed: string;
@@ -23,6 +25,7 @@ export const useHud = create<HudState>((set) => ({
   mode: "slide",
   drop: 1,
   depth: 0,
+  g: 1,
   hint: "W paddle · S brake · A/D lean",
   exits: 0,
   seed: "",
