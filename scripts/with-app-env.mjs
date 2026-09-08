@@ -104,6 +104,26 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+/**
+ * On Windows a bare package command (`vite`) resolves to a `.cmd` shim that
+ * Node refuses to spawn without a shell. Run the package's bin script with this
+ * node instead; commands that carry a path or extension pass through untouched.
+ */
+export function resolveCommand(command, args, root) {
+  if (process.platform !== "win32" || /[\\/.]/.test(command)) return { command, args };
+  try {
+    const pkgDir = join(root, "node_modules", command);
+    const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[command];
+    if (typeof bin === "string") {
+      return { command: process.execPath, args: [join(pkgDir, bin), ...args] };
+    }
+  } catch {
+    // Not an installed package: let spawn report the bare command as before.
+  }
+  return { command, args };
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
@@ -111,7 +131,8 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
+  const resolved = resolveCommand(command, args, projectRoot());
+  const child = spawn(resolved.command, resolved.args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));
