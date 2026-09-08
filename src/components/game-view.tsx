@@ -27,13 +27,18 @@ export function GameView() {
     let cancelled = false;
     const id = requestAnimationFrame(() => {
       if (cancelled) return;
+      const fail = (err: unknown) => {
+        if (cancelled) return;
+        setFailed(err instanceof Error ? err.message : "Failed to start renderer");
+      };
       try {
         instance = new Game(canvas);
-        instance.start();
         gameRef.current = instance;
+        // The backend comes up asynchronously; a rejection here means neither
+        // WebGPU nor WebGL 2 was available.
+        instance.start().catch(fail);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Failed to start renderer";
-        setFailed(message);
+        fail(err);
       }
     });
     return () => {
