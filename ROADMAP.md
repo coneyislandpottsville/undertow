@@ -67,10 +67,18 @@ Done in Build 2 (phases 1 and 2, PRs #1 to #4):
 - Paddle current and wake; flow streaks on the tube; splash burst; exit FOV
   punch; layered procedural audio; g readout in the HUD.
 
+Done in Build 3 session 1 (PRs #6 to #8): the renderer switch on three r186,
+pixel-equivalent to Build 2 on both backends; the tube water film; bloom and
+radial blur. Gameplay files changed only where the renderer forced it (async
+init, spray as an instanced sprite, vertex tangents and the tube radius for the
+film).
+
 Open:
 
 - Progression undecided: depth counter only.
-- Looks are still solid colour plus streaks; the pool wall reads near-black.
+- The pool wall reads near-black; the film's wet band follows gravity, not
+  apparent g, so loop tops are wet on the wrong wall; the exit flash (ring
+  bloom at point-blank range) may want taming.
 - Corkscrews at low speed slosh the rider; tune pendulum gain and damping by feel.
 - Mobile untested: touch keys exist, layout and performance do not.
 
@@ -118,12 +126,18 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
 - Step 1 (done in Build 3.1): `three/webgpu` import, materials.ts as node
   materials, the ride pixel-equivalent on both backends. The ride publishes the
   lab's `window.__lab` meter; numbers per step in `docs/research/ride-bench.md`.
-- Then, in product order: tube water film (done in Build 3.2: flow-mapped
-  ripple normals, wet roughness, anisotropic streaks, wall refraction, flow at
-  a share of rider speed; mouths inherit it), bloom and radial blur (exit rings
-  and current strips already assume it), whirlpool funnel (the tension
-  moment), pool reflection and refraction with the compute height field, spray
-  and mist.
+- Done in Build 3 session 1 (PRs #6 to #8): the switch; the tube water film
+  (flow-mapped ripple normals, wet roughness, anisotropic streaks, wall
+  refraction, flow at a share of rider speed, mouths inherit it); the post
+  stack (`src/game/post.ts`: MRT emissive bloom on exit rings, mouths, and
+  current strips, radial zoom blur from speed and the exit suck-in, `?post=0`
+  to bypass). Numbers per step in `docs/research/ride-bench.md`; every route
+  smokes on both backends with `node scripts/route-smoke.mjs`.
+- Next, in product order: whirlpool funnel (the tension moment), pool
+  reflection and refraction with the compute height field, spray and mist.
+  Build the funnel first. Alongside it, make the film's wet band follow
+  apparent g along the path instead of gravity: today the top of a loop is wet
+  on the inner wall while the rider is pressed to the outer one.
 - Budget: 60 fps at 3440×1440 on an RTX 2060 class GPU with everything on;
   measured costs in `docs/research/water-bench.md`. Fallback tier on WebGL 2:
   analytic ripples instead of the height field, fewer particles, half-res

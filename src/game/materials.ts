@@ -2,13 +2,16 @@ import * as THREE from "three/webgpu";
 import {
   abs,
   color,
+  emissive,
   float,
   fract,
   instancedDynamicBufferAttribute,
   mix,
   modelNormalMatrix,
+  mrt,
   normalLocal,
   normalMap,
+  output,
   smoothstep,
   texture,
   uniform,
@@ -136,7 +139,7 @@ export function createRingMaterial(palette: Palette): THREE.MeshStandardNodeMate
 }
 
 export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({
+  const mat = new THREE.MeshStandardNodeMaterial({
     color: palette.water,
     roughness: 0.12,
     metalness: 0.28,
@@ -147,6 +150,10 @@ export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMat
     side: THREE.DoubleSide,
     depthWrite: false,
   });
+  // The emissive lifts the pool's colour; only a fifth of it should bloom, or
+  // the whole pool washes out around the exits.
+  mat.mrtNode = mrt({ emissive: emissive.mul(0.2) });
+  return mat;
 }
 
 export function createWallMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
@@ -181,7 +188,7 @@ export function createExitRingMaterial(palette: Palette): THREE.MeshStandardNode
 }
 
 export function createCurrentMaterial(palette: Palette): THREE.MeshBasicNodeMaterial {
-  return new THREE.MeshBasicNodeMaterial({
+  const mat = new THREE.MeshBasicNodeMaterial({
     color: palette.ring,
     map: currentTexture(),
     transparent: true,
@@ -190,6 +197,10 @@ export function createCurrentMaterial(palette: Palette): THREE.MeshBasicNodeMate
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
   });
+  // Bloom reads the emissive target and an unlit strip writes none, so hand
+  // it the strip's own colour and alpha; the direct look is unchanged.
+  mat.mrtNode = mrt({ emissive: output });
+  return mat;
 }
 
 export function createWakeMaterial(): THREE.MeshBasicNodeMaterial {

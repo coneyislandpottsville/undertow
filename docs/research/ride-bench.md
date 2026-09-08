@@ -13,8 +13,17 @@ are GPU milliseconds per frame from timestamp queries (`?gpu=1`). Machine and br
 | 3.1, `WebGPURenderer`, r186 (Step 1: the switch) | webgl | 1155 (1.2) | 822 (1.9) |
 | 3.2, tube water film (Step 2) | webgpu | 764 (1.1) | 758 (2.0) |
 | 3.2, tube water film (Step 2) | webgl | 953 (1.3) | 762 (2.1) |
+| 3.3, bloom and radial blur (Step 3) | webgpu | 394 (1.6) | 245 (2.9) |
+| 3.3, bloom and radial blur (Step 3) | webgl | 389 (2.6) | 251 (4.3) |
 
 Notes:
+
+- Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
+  twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution
+  bloom mip chain on the emissive channel, a 10-tap zoom blur). Frame time roughly doubles
+  because the pipeline is a dozen small passes, each with CPU cost; 245 fps at 3440×1440 with
+  MSAA 4× leaves four times the 60 fps budget for the whirlpool funnel, pool surface, and spray.
+  `?post=0` renders the scene pass straight to the canvas for comparison.
 
 - Step 2 adds 0.3 to 0.5 ms of GPU time per frame for the film (flow-mapped normals at two
   scales, refraction, anisotropic physical lighting on every tube and mouth in view); frame
