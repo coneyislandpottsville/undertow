@@ -43,8 +43,22 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 4.1, the theme seam (Step 1) | tube | webgl | 325 (3.0) | 221 (5.0) |
 | 4.1, the theme seam (Step 1) | pool | webgpu | 218 (1.3) | 128 (2.6) |
 | 4.1, the theme seam (Step 1) | pool | webgl | 237 (3.6) | 160 (6.3) |
+| 4.2, the pool wall and basin (Step 2) | tube | webgpu | 352 (0.5) | 215 (0.9) |
+| 4.2, the pool wall and basin (Step 2) | tube | webgl | 336 (2.8) | 214 (4.6) |
+| 4.2, the pool wall and basin (Step 2) | pool | webgpu | 161 (2.1) | 96 (1.9) |
+| 4.2, the pool wall and basin (Step 2) | pool | webgl | 160 (6.5) | 103 (11.1) |
 
 Notes:
+
+- Build 4 step 2 costs the pool phase about a quarter of its frame rate: 96 fps at 3440x1440
+  on WebGPU and 103 on the WebGL 2 tier, 10.4 and 9.7 ms of a 16.7 ms budget. The wall, the
+  rim, the sleeve and the basin floor all run the same treatment: two plain noise evaluations
+  (the strata warp and the grain), a three-octave fractal for the erosion, a two-octave one
+  ridged into caustics, and a normal perturbed from the screen-space gradient of the first
+  two. Every one of them is drawn a second time in the half-resolution reflection pass.
+
+  The tube phase gains about 10%: the tube mesh now stops where it enters the pool, so its
+  last several metres of geometry and their rings are gone.
 
 - Build 4 step 1 is a seam, not a look: the numbers a section used to read off a palette
   now come off a theme, and the shared rigs read theirs as uniforms. Held at the mouth the
