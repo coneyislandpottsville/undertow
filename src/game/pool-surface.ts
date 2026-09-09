@@ -212,7 +212,7 @@ const MOUTH_FAR = 0.55;
 /** Square metres the rider's drag spreads over. */
 const PUSH_SPREAD = 4;
 
-/** The open pool's waves, as `x` and `z` wavenumber, rate, and amplitude. */
+/** The pool's swell, as `x` and `z` wavenumber, rate, and amplitude. */
 const SWELL: readonly (readonly [number, number, number, number])[] = [
   [1.4, 0.6, 1.8, 0.03],
   [-0.8, 1.7, -1.3, 0.024],
@@ -227,16 +227,7 @@ function smoothFall(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** The CPU twin of the wave sum, in metres about the still water line. */
-function swellAt(x: number, z: number, t: number): number {
-  let sum = 0;
-  for (const [kx, kz, w, a] of SWELL) sum += Math.sin(x * kx + z * kz + t * w) * a;
-  return sum;
-}
-
 export type PoolSurfaceOptions = {
-  /** "field" runs the height and foam field, "analytic" drops it for waves alone. */
-  ripples: "field" | "analytic";
   /** Reflection render-target scale; 0 turns the reflector off. */
   reflect: number;
   refract: boolean;
@@ -286,23 +277,23 @@ export type PoolSurface = {
    */
   slopeAt: (r: number, energy: number) => number;
   /**
-   * World height of the surface over world x/z: funnel, waves and whatever the
+   * World height of the surface over world x/z: the funnel and whatever the
    * field is carrying there. What the camera is tested against to decide it has
    * gone under, so a splash wave or a crown washing over the eye counts.
    */
-  waterLineAt: (x: number, z: number, energy: number, elapsed: number) => number;
+  waterLineAt: (x: number, z: number, energy: number) => number;
   /**
    * How far the water stands above its still level at a world point, funnel
-   * excluded: the waves and the field. What lifts a floating rider, so their
-   * own splash and the ring off the wall carry them.
+   * excluded. What lifts a floating rider, so the swell, their own splash and
+   * the ring off the wall carry them.
    */
-  chopAt: (x: number, z: number, elapsed: number) => number;
+  chopAt: (x: number, z: number) => number;
   /**
    * Which way that water is tilted, as dh/dx and dh/dz. A float slides down it
    * and sits square on it, so this is what lets a crown shove the rider and
    * roll their horizon rather than only lift them.
    */
-  chopSlopeAt: (x: number, z: number, elapsed: number, out: THREE.Vector2) => THREE.Vector2;
+  chopSlopeAt: (x: number, z: number, out: THREE.Vector2) => THREE.Vector2;
   /** How broken the water is at a world point, 0 to 1: what the rider is sitting in. */
   foamAt: (x: number, z: number) => number;
   /** The water line as a shader node, for rigs that need it per particle. */
@@ -342,7 +333,7 @@ export type PoolSurface = {
    * pool it stands over comes into view.
    */
   warm: (object: THREE.Object3D, depthOf: (camera: THREE.Camera) => number) => Promise<void>;
-  info: () => { ripples: string; reflect: number };
+  info: () => { reflect: number };
   dispose: () => void;
 };
 
@@ -368,7 +359,6 @@ export function createPoolSurface(
   /** What the flume is delivering over the pool's own level there, in metres. */
   outfall: F,
 ): PoolSurface {
-  const useSim = options.ripples === "field";
   const uTime = uniform(0);
   const uEnergy = uniform(0);
   const uRadius = uniform(16);
@@ -463,32 +453,20 @@ export function createPoolSurface(
   };
 
   /**
-   * The pool's own motion: chop over a long swell, as directional waves. Both
-   * tiers carry it, and the numbers are shared with the CPU twin below, so the
-   * game can ask where the water line is and get the surface the rider sees.
-   * A height field that no one has splashed settles to dead flat, and a
-   * dead-flat pool at a grazing angle is a sheet of paint.
+   * The line the pool's water is pulled back to, in metres: a long swell in
+   * directional waves. It is the field's rest state rather than a shape laid
+   * over the top of it, so what the field carries is the whole surface — a ring
+   * runs across a swell face and breaks on the slope the two make together, the
+   * wall is lapped by the water actually standing against it, and the copy the
+   * game reads is the water the rider can see with nothing added to it.
    */
-  const waves = (p: V2): F => {
+  const swell = (p: V2): F => {
     let sum: F = float(0);
     for (const [kx, kz, w, a] of SWELL) {
       sum = sum.add(sin(p.x.mul(kx).add(p.y.mul(kz)).add(uTime.mul(w))).mul(a));
     }
     return sum;
   };
-
-  /**
-   * The floatie's ring wake, for the tier with no height field to carry it.
-   * `uWake.z` is how deep the floatie presses (DISH), so the ring is a fraction
-   * of that: at full dish depth it stands about five centimetres proud, which
-   * is what the 0.2 m grid can resolve without faceting.
-   */
-  const wakeRing = (p: V2): F => {
-    const d = length(p.sub(uWake.xy));
-    return sin(d.mul(6).sub(uTime.mul(7))).mul(exp(d.mul(-0.9))).mul(uWake.z.mul(0.5));
-  };
-
-  const analytic = (p: V2): F => waves(p).add(wakeRing(p));
 
   /**
    * Fine per-pixel detail, so the surface is not smooth between grid cells.
@@ -548,6 +526,11 @@ export function createPoolSurface(
     const srcUV = fieldUV(src);
     const here = fieldAt(srcUV);
     const r = length(p);
+    // The swell is the line, so what the wave operator and the pull to level
+    // work on is how far the water stands off it. A parcel keeps that offset
+    // where the flow carries it and finds the line at its new home.
+    const datum = swell(p);
+    const offLine = here.x.sub(swell(src));
     // The wall reflects: a neighbour outside the pool reads back as this cell,
     // which is a zero-gradient edge, so a ring runs out and comes back instead
     // of being absorbed by the rim. The neighbours are taken around the water
@@ -563,15 +546,17 @@ export function createPoolSurface(
     // water in and the pool stood most of a metre proud of its own line. The
     // cells past the rim are ghosts of the ones inside instead, and the stencil
     // above is what keeps the wall a wall.
-    const neighbour = (offset: V2): F => {
+    const neighbour = (offset: V2) => {
       const q = src.add(offset.mul(PLANE_HALF * 2));
-      return mix(here.x, fieldAt(srcUV.add(offset)).x, step(length(q), uRadius));
+      const line = swell(q);
+      const off = mix(offLine, fieldAt(srcUV.add(offset)).x.sub(line), step(length(q), uRadius));
+      return { off, total: off.add(line) };
     };
     const west = neighbour(vec2(-TEXEL, 0));
     const east = neighbour(vec2(TEXEL, 0));
     const south = neighbour(vec2(0, -TEXEL));
     const north = neighbour(vec2(0, TEXEL));
-    const lap = west.add(east).add(south).add(north).mul(0.25).sub(here.x);
+    const lap = west.off.add(east.off).add(south.off).add(north.off).mul(0.25).sub(offLine);
     // A dome for a drop; for a body entering the water, the crater it displaces
     // with the crown standing around it, which peaks a radius and a bit out.
     const dImp = length(p.sub(uImpulse.xy));
@@ -594,14 +579,14 @@ export function createPoolSurface(
     const dWake = length(p.sub(uWake.xy));
     const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
     const under = exp(dWake.mul(dWake).div(2).negate());
-    const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
+    const spring = dish.sub(offLine).mul(0.12).sub(here.y.mul(0.22)).mul(under);
     const dIn = length(p.sub(uInflow.xy));
     const landing = exp(dIn.mul(dIn).div(3).negate()).mul(uInflow.z);
     // What the flume is handing over. The rider pushes a bow down it, so the
     // water under the mouth is already piling before they come out of it.
     const delivered = outfall.mul(INFLOW_SURGE);
     const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
-    const raw = here.x.mul(LEVEL_DAMP).add(moved);
+    const raw = offLine.mul(LEVEL_DAMP).add(moved).add(datum);
     const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
     // Whatever the limit took off the height comes off the velocity with it,
     // the way hitting a wall spends the speed that hit it — and a cell sitting
@@ -617,7 +602,8 @@ export function createPoolSurface(
     const stir = sin(uTime.mul(5.1))
       .add(sin(uTime.mul(3.17).add(2)))
       .mul(0.5 * INFLOW_CHURN)
-      .add(delivered);
+      .add(delivered)
+      .add(datum);
     const height = mix(limited, stir, landing.mul(INFLOW_GRIP));
 
     // Foam is carried the same way, so the spiral arms of a whirlpool are a
@@ -631,7 +617,9 @@ export function createPoolSurface(
     // A wave steep enough to fall over does. The four neighbours the curvature
     // is already made of are the slope as well, and a crest carrying that slope
     // is the top of a wave whose face has run out of water to stand on.
-    const steep = length(vec2(east.sub(west), north.sub(south))).div(CELL * 2);
+    const steep = length(vec2(east.total.sub(west.total), north.total.sub(south.total))).div(
+      CELL * 2,
+    );
     const breaking = smoothstep(BREAK_LOW, BREAK_HIGH, steep)
       .mul(smoothstep(0, 0.1, here.x))
       .mul(FOAM_BREAK);
@@ -640,7 +628,7 @@ export function createPoolSurface(
     const inflow = landing.mul(abs(delivered).mul(4).add(1)).mul(FOAM_INFLOW);
     // Water breaking against the wall, so the rim is never a clean edge.
     const lapping = smoothstep(uRadius.sub(1.8), uRadius.sub(0.2), r)
-      .mul(waves(p).mul(6).add(0.25).max(0))
+      .mul(here.x.mul(6).add(0.25).clamp(0, 2))
       .mul(FOAM_LAP);
     // Aeration at the impact itself, so a splash whitens before its own ripples
     // have had time to churn the water.
@@ -783,10 +771,7 @@ export function createPoolSurface(
    */
   const waterLineNode = (world: V3): F => {
     const p = vec2(world.x.sub(uCenter.x), world.z.sub(uCenter.z));
-    return uCenter.y
-      .add(funnel(p))
-      .add(waves(p))
-      .add(useSim ? sampleField(p).x : wakeRing(p));
+    return uCenter.y.add(funnel(p)).add(sampleField(p).x);
   };
 
   // ---- displacement --------------------------------------------------------
@@ -797,23 +782,15 @@ export function createPoolSurface(
   const funnelH = funnel(planeXZ);
   const funnelSlope = slopeOf(funnel, planeXZ, 0.08);
 
-  const waveH = waves(planeXZ);
-  const waveSlope = slopeOf(waves, planeXZ, 0.08);
-  // Waves everywhere, the field on top for wakes, splashes and drops. Its
+  // The field is the whole surface — swell, wakes, splashes and drops. Its
   // slope comes from four taps around the vertex, which is finer than the
   // vertex grid and costs nothing in the fragment stage.
   const fieldH = (p: V2): F => sampleField(p).x;
-  const heightNode: F = useSim
-    ? funnelH.add(waveH).add(fieldH(planeXZ))
-    : funnelH.add(analytic(planeXZ));
-  const rippleSlope: V2 = useSim
-    ? waveSlope.add(
-        vec2(
-          fieldH(planeXZ.add(vec2(CELL, 0))).sub(fieldH(planeXZ.sub(vec2(CELL, 0)))).div(CELL * 2),
-          fieldH(planeXZ.add(vec2(0, CELL))).sub(fieldH(planeXZ.sub(vec2(0, CELL)))).div(CELL * 2),
-        ),
-      )
-    : slopeOf(analytic, planeXZ, 0.08);
+  const heightNode: F = funnelH.add(fieldH(planeXZ));
+  const rippleSlope: V2 = vec2(
+    fieldH(planeXZ.add(vec2(CELL, 0))).sub(fieldH(planeXZ.sub(vec2(CELL, 0)))).div(CELL * 2),
+    fieldH(planeXZ.add(vec2(0, CELL))).sub(fieldH(planeXZ.sub(vec2(0, CELL)))).div(CELL * 2),
+  );
 
   // Slopes add, so one normal carries funnel, ripples, and per-pixel detail.
   const vertexSlope = vertexStage(funnelSlope.add(rippleSlope));
@@ -1046,36 +1023,24 @@ export function createPoolSurface(
       const q = radius / scale;
       return (FUNNEL_DEPTH * e * (1.1 * q * Math.exp(-q * q) + 0.45 * Math.exp(-q))) / scale;
     },
-    waterLineAt(x, z, e, elapsed) {
+    waterLineAt(x, z, e) {
       if (!pool) return 0;
       const dx = x - pool.center.x;
       const dz = z - pool.center.z;
-      return (
-        pool.waterY +
-        funnelHeight(Math.hypot(dx, dz), e) +
-        swellAt(dx, dz, elapsed) +
-        fieldHeight(dx, dz)
-      );
+      return pool.waterY + funnelHeight(Math.hypot(dx, dz), e) + fieldHeight(dx, dz);
     },
-    chopAt(x, z, elapsed) {
+    chopAt(x, z) {
       if (!pool) return 0;
-      const dx = x - pool.center.x;
-      const dz = z - pool.center.z;
-      return swellAt(dx, dz, elapsed) + fieldHeight(dx, dz);
+      return fieldHeight(x - pool.center.x, z - pool.center.z);
     },
-    chopSlopeAt(x, z, elapsed, out) {
+    chopSlopeAt(x, z, out) {
       out.set(0, 0);
       if (!pool) return out;
       const dx = x - pool.center.x;
       const dz = z - pool.center.z;
-      for (const [kx, kz, w, a] of SWELL) {
-        const c = Math.cos(dx * kx + dz * kz + elapsed * w) * a;
-        out.x += c * kx;
-        out.y += c * kz;
-      }
       const h = MIRROR_CELL;
-      out.x += (fieldHeight(dx + h, dz) - fieldHeight(dx - h, dz)) / (2 * h);
-      out.y += (fieldHeight(dx, dz + h) - fieldHeight(dx, dz - h)) / (2 * h);
+      out.x = (fieldHeight(dx + h, dz) - fieldHeight(dx - h, dz)) / (2 * h);
+      out.y = (fieldHeight(dx, dz + h) - fieldHeight(dx, dz - h)) / (2 * h);
       return out;
     },
     foamAt(x, z) {
@@ -1146,16 +1111,17 @@ export function createPoolSurface(
       if (mirrorTarget) {
         mirrorTarget.position.z = funnelHeight(Math.hypot(dx, dz), nextEnergy);
       }
-      if (!useSim) return;
       // Catching a fresh pool up runs whether or not it is on screen: it is
       // what the water was doing before the rider ever got there. A few steps a
-      // frame, so the hand-off does not stall on it.
+      // frame, so the hand-off does not stall on it, and the copy is read while
+      // it runs so the game has the pool's water before it can see the pool.
       uImpulse.value.w = 0;
       for (let i = 0; i < Math.min(priming, FIELD_CATCHUP); i++) stepField();
       priming = Math.max(0, priming - FIELD_CATCHUP);
-      // No point stepping a field nobody can see; the waves carry the surface
-      // on their own the moment it comes back.
-      if (!mesh.visible) return;
+      if (!mesh.visible) {
+        if (priming > 0) readMirror();
+        return;
+      }
       acc += dt;
       let steps = 0;
       while (acc >= STEP && steps < 3) {
@@ -1172,7 +1138,7 @@ export function createPoolSurface(
       readMirror();
     },
     warm,
-    info: () => ({ ripples: options.ripples, reflect: options.reflect }),
+    info: () => ({ reflect: options.reflect }),
     dispose() {
       mesh.removeFromParent();
       geo.dispose();
@@ -1188,18 +1154,12 @@ export function createPoolSurface(
   };
 }
 
-/** Read the surface knobs off the query string: `?ripples=`, `?reflect=`, `?refract=`, `?foam=`. */
+/** Read the surface knobs off the query string: `?reflect=`, `?refract=`, `?foam=`. */
 export function poolSurfaceOptions(query: URLSearchParams): PoolSurfaceOptions {
-  // Both tiers run the field: it is a render pass, not compute, so a splash
-  // rings the water the same on either. `?ripples=analytic` drops it for the
-  // waves alone.
-  const asked = query.get("ripples");
-  const ripples: "field" | "analytic" = asked === "analytic" ? "analytic" : "field";
   const raw = query.get("reflect");
   const reflect = raw === null ? 0.5 : Math.max(0, Math.min(1, Number(raw) || 0));
   const askedFoam = query.get("foam");
   return {
-    ripples,
     reflect,
     refract: query.get("refract") !== "0",
     foam: askedFoam === null ? 1 : Math.max(0, Number(askedFoam) || 0),

@@ -516,7 +516,7 @@ export class Game {
     this.resize();
     const options = poolSurfaceOptions(this.query);
     // The flume first: the pool's inflow reads what it is delivering.
-    const flume = createSheetField(this.renderer, options.ripples === "field");
+    const flume = createSheetField(this.renderer);
     this.sheetField = flume;
     flume.attach(this.current);
     const surface = createPoolSurface(
@@ -711,7 +711,7 @@ export class Game {
     let line = pool.waterY;
     if (surface && dx * dx + dz * dz < reach * reach) {
       const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
-      line = surface.waterLineAt(cam.x, cam.z, e, this.clock.elapsed);
+      line = surface.waterLineAt(cam.x, cam.z, e);
       target = THREE.MathUtils.clamp((line - cam.y) / CROSS_BAND, 0, 1);
     }
     this.submerged = expDamp(this.submerged, target, 18, dt);
@@ -889,7 +889,7 @@ export class Game {
    * has mass — and because lagging the crown is what lets it wash over them.
    */
   private updateBob(dt: number) {
-    const chop = this.poolSurface?.chopAt(this.px, this.pz, this.clock.elapsed) ?? 0;
+    const chop = this.poolSurface?.chopAt(this.px, this.pz) ?? 0;
     this.bob = expDamp(this.bob, chop, BOB_LAMBDA, dt);
   }
 
@@ -900,7 +900,7 @@ export class Game {
    * else is happening. The shove bleeds off, so it carries rather than steers.
    */
   private updateSurf(dt: number) {
-    const slope = this.poolSurface?.chopSlopeAt(this.px, this.pz, this.clock.elapsed, _slope);
+    const slope = this.poolSurface?.chopSlopeAt(this.px, this.pz, _slope);
     if (slope) {
       this.driftX -= slope.x * SLOPE_PUSH * dt;
       this.driftZ -= slope.y * SLOPE_PUSH * dt;
@@ -921,7 +921,7 @@ export class Game {
   private updateTilt(dt: number) {
     const slope = this.reducedMotion
       ? null
-      : this.poolSurface?.chopSlopeAt(this.px, this.pz, this.clock.elapsed, _slope);
+      : this.poolSurface?.chopSlopeAt(this.px, this.pz, _slope);
     const x = slope ? THREE.MathUtils.clamp(slope.x, -TILT_MAX, TILT_MAX) : 0;
     const z = slope ? THREE.MathUtils.clamp(slope.y, -TILT_MAX, TILT_MAX) : 0;
     this.tiltX = expDamp(this.tiltX, x, TILT_LAMBDA, dt);
@@ -1454,7 +1454,7 @@ export class Game {
     if (!flume) return;
     const pool = this.current.pool;
     flume.setPoolLevel(
-      this.poolSurface?.chopAt(pool.inflow.x, pool.inflow.z, this.clock.elapsed) ?? 0,
+      this.poolSurface?.chopAt(pool.inflow.x, pool.inflow.z) ?? 0,
     );
     const path = this.current.path;
     const sheet = this.current.theme.sheet;
