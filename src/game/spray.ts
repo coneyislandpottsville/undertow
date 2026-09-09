@@ -5,7 +5,6 @@ import {
   cameraFar,
   cameraNear,
   cameraPosition,
-  color,
   cos,
   float,
   hash,
@@ -23,7 +22,7 @@ import {
   vec4,
   viewportLinearDepth,
 } from "three/tsl";
-import type { Palette } from "./palette";
+import type { Theme } from "./theme";
 
 /** Longest a droplet lives, s. Sets the scale of the life fade. */
 const MAX_LIFE = 1.4;
@@ -37,6 +36,8 @@ const BURST = 900;
 const MIST = 48;
 /** How long the mist at a splash takes to fade, s. */
 const MIST_LIFE = 3.2;
+
+const WHITE = new THREE.Color(1, 1, 1);
 
 export type SprayOptions = {
   /** Droplets in the pool. `?spray=0` turns the whole rig off. */
@@ -74,8 +75,13 @@ export type Spray = {
   ) => void;
   /** Stop emitting from the tube; droplets already thrown finish their arc. */
   stopTube: () => void;
+  /**
+   * Point the droplets and the mist at a theme. `t` under 1 eases toward it,
+   * so a section change is a uniform swap rather than a rebuild.
+   */
+  setTheme: (theme: Theme, t?: number) => void;
   /** One-shot burst of droplets and a puff of mist at a world point. */
-  splash: (position: THREE.Vector3, palette: Palette) => void;
+  splash: (position: THREE.Vector3) => void;
   update: (dt: number, riderLight: THREE.Vector3) => void;
   info: () => { count: number };
   dispose: () => void;
@@ -103,6 +109,7 @@ export function createSpray(
   /** Mist anchor and how much of it is left, 0 to 1. */
   const uMist = uniform(new THREE.Vector4(0, -1000, 0, 0));
   const uMistColor = uniform(new THREE.Vector3(1, 1, 1));
+  const uDroplet = uniform(new THREE.Vector3(1, 1, 1));
 
   // xyz position, w remaining life; xyz velocity, w a per-spawn random.
   const state = instancedArray(N, "vec4");
@@ -201,7 +208,7 @@ export function createSpray(
   });
   sprayMat.positionNode = worldP;
   sprayMat.scaleNode = vec2(float(options.size).mul(remain.mul(0.6).add(0.6)));
-  sprayMat.colorNode = color(0xdff4f8).mul(att);
+  sprayMat.colorNode = uDroplet.mul(att);
   sprayMat.opacityNode = radial
     .mul(remain.smoothstep(0, 0.35))
     .mul(softFade)
@@ -279,6 +286,7 @@ export function createSpray(
   let burst = 0;
   let mistLife = 0;
   const rgb = new THREE.Color();
+  const rgbVec = new THREE.Vector3();
 
   return {
     setTubeEmitter(position, tangent, radial: THREE.Vector3, binormal, speed) {
@@ -294,13 +302,19 @@ export function createSpray(
     stopTube() {
       tubeOn = false;
     },
-    splash(position, palette) {
+    setTheme(theme, t = 1) {
+      rgb.set(theme.ring);
+      uMistColor.value.lerp(rgbVec.set(rgb.r, rgb.g, rgb.b), t);
+      // Droplets are lit water, not tinted water: the theme's brightest tone
+      // lifted most of the way to white.
+      rgb.lerp(WHITE, 0.55);
+      uDroplet.value.lerp(rgbVec.set(rgb.r, rgb.g, rgb.b), t);
+    },
+    splash(position) {
       burst = BURST;
       uOrigin.value.copy(position);
       mistLife = MIST_LIFE;
       uMist.value.set(position.x, position.y, position.z, 1);
-      rgb.set(palette.ring);
-      uMistColor.value.set(rgb.r, rgb.g, rgb.b);
     },
     update(dt, riderLight) {
       frame++;

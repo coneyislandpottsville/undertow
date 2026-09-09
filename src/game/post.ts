@@ -41,6 +41,8 @@ export type RidePost = {
   render: () => void;
   /** Zoom-blur strength as a share of the screen radius; 0 is off, 0.1 is the exit suck-in. */
   zoom: { value: number };
+  /** The bloom's own uniforms, so a theme can set how hard the ride glows. */
+  bloom: { strength: { value: number }; radius: { value: number } };
   dispose: () => void;
 };
 
@@ -67,6 +69,7 @@ export function createRidePost(
   return {
     render: () => pipeline.render(),
     zoom,
+    bloom: { strength: glow.strength, radius: glow.radius },
     dispose: () => pipeline.dispose(),
   };
 }

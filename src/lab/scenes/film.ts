@@ -42,15 +42,15 @@ type V3 = Node<"vec3">;
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
-  const palette = params.palette;
+  const theme = params.theme;
   const radius = 2.75;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  addLights(scene, camera, palette);
+  addLights(scene, camera, theme);
 
   const curve = loopCurve();
   const L = curve.getLength();
@@ -91,8 +91,8 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
 
   // Wall seen through the film: the streak map sampled with a normal-driven offset.
   const wallUV = vec2(uv().x.mul(L / 5), uv().y.mul(2)).add(tn.xy.mul(uRefract).mul(wet));
-  const wallColor = texture(streakTex, wallUV).rgb.mul(color(palette.tube));
-  const filmTint = mix(vec3(1), color(palette.water).mul(1.3), wet.mul(0.35));
+  const wallColor = texture(streakTex, wallUV).rgb.mul(color(theme.tube));
+  const filmTint = mix(vec3(1), color(theme.water).mul(1.3), wet.mul(0.35));
 
   const material = new THREE.MeshPhysicalNodeMaterial({ side: THREE.BackSide, metalness: 0.05 });
   material.colorNode = wallColor.mul(filmTint);

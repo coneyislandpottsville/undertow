@@ -39,8 +39,19 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 3.7, wet band on apparent g (Step 7) | tube | webgl | 323 (3.1) | 220 (5.3) |
 | 3.7, wet band on apparent g (Step 7) | pool | webgpu | 220 (1.2) | 128 (3.6) |
 | 3.7, wet band on apparent g (Step 7) | pool | webgl | 245 (4.7) | 162 (6.2) |
+| 4.1, the theme seam (Step 1) | tube | webgpu | 322 (0.4) | 192 (0.7) |
+| 4.1, the theme seam (Step 1) | tube | webgl | 325 (3.0) | 221 (5.0) |
+| 4.1, the theme seam (Step 1) | pool | webgpu | 218 (1.3) | 128 (2.6) |
+| 4.1, the theme seam (Step 1) | pool | webgl | 237 (3.6) | 160 (6.3) |
 
 Notes:
+
+- Build 4 step 1 is a seam, not a look: the numbers a section used to read off a palette
+  now come off a theme, and the shared rigs read theirs as uniforms. Held at the mouth the
+  frame matches build 3.7 (mean difference 0.55 of 255, all of it in the film's idle ripple
+  phase and on ring edges). A run on 3.7 sources immediately before this one gave 199 and
+  128 fps at 3440x1440 on WebGPU and 224 and 163 on WebGL 2, so the change is inside
+  run-to-run noise.
 
 - Step 7 is free within noise: the wet band reads one more vertex attribute and swaps a
   component for a dot product. The direction it carries is worked out on the CPU once per

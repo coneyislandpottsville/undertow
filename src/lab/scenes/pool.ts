@@ -52,7 +52,7 @@ type V3 = Node<"vec3">;
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
-  const palette = params.palette;
+  const theme = params.theme;
   const R = 16;
   const useSim = params.str("sim", "analytic") === "compute";
   const N = Math.max(64, Math.round(params.num("grid", 192) / 64) * 64);
@@ -60,15 +60,15 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const refractOn = params.on("refract", true);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  const { rider } = addLights(scene, camera, palette);
+  const { rider } = addLights(scene, camera, theme);
 
   // Basin: textured floor and a few submerged shapes give refraction and absorption something to bend.
   const wallMat = new THREE.MeshStandardNodeMaterial({
-    color: palette.wall,
+    color: theme.wall,
     roughness: 0.72,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -85,7 +85,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -3.2;
   scene.add(floor);
-  const rockMat = new THREE.MeshStandardNodeMaterial({ color: palette.stripe, roughness: 0.9 });
+  const rockMat = new THREE.MeshStandardNodeMaterial({ color: theme.stripe, roughness: 0.9 });
   for (const [x, z, s] of [
     [4, 2, 1.4],
     [-5, -3, 1.1],
@@ -97,7 +97,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   }
   const lip = new THREE.Mesh(
     new THREE.TorusGeometry(R, 0.38, 8, 96),
-    new THREE.MeshStandardNodeMaterial({ color: palette.ring, roughness: 0.35, metalness: 0.15 }),
+    new THREE.MeshStandardNodeMaterial({ color: theme.ring, roughness: 0.35, metalness: 0.15 }),
   );
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
@@ -228,7 +228,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   }
 
   // Shading
-  const waterRgb = new THREE.Color(palette.water);
+  const waterRgb = new THREE.Color(theme.water);
   const waterCol = vec3(waterRgb.r, waterRgb.g, waterRgb.b);
   const nView = transformDirection(normalWorld, cameraViewMatrix);
   const distortion = nView.xy.mul(uRefract);

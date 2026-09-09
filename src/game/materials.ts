@@ -32,8 +32,8 @@ import { rippleNormalCanvas, streakCanvas } from "./textures";
  * Everything is a node material on WebGPURenderer (WebGL 2 backend as the
  * fallback); the factory names are the seam generate.ts and game.ts build on.
  */
-export { PALETTES, paletteAt, type Palette } from "./palette";
-import type { Palette } from "./palette";
+export { THEMES, themeAt, type Theme } from "./theme";
+import type { Theme } from "./theme";
 
 type V2 = Node<"vec2">;
 type V3 = Node<"vec3">;
@@ -90,17 +90,18 @@ function tubeTextures() {
  * Tube interior: the wall's streak map seen through a thin water film.
  * Wetness comes from the geometric normal (the floor faces down), so the lower
  * wall carries flow-mapped ripple normals at two scales, roughness drops from
- * 0.5 dry to 0.1 wet, the wall map is refracted through the ripples, and the
- * specular lobe is stretched along the flow. The film moves at a share of the
- * rider's speed (scrollTube) plus an idle trickle. `length` and `radius` size
- * the tiling so ripples stay 2 m and streaks 5 m long on any section.
+ * dry to wet, the wall map is refracted through the ripples, and the specular
+ * lobe is stretched along the flow. The film moves at a share of the rider's
+ * speed (scrollTube) plus an idle trickle. `length` and `radius` size the
+ * tiling so ripples stay 2 m and streaks 5 m long on any section.
  */
 export function createTubeMaterial(
-  palette: Palette,
+  theme: Theme,
   length = 12,
   radius = 2.75,
 ): THREE.MeshPhysicalNodeMaterial {
   const { streak, ripple } = tubeTextures();
+  const film = theme.film;
   const uFlow = uniform(0);
   const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
 
@@ -108,7 +109,7 @@ export function createTubeMaterial(
   // water runs on this stretch of wall, gravity plus the centrifugal push of
   // speed² × curvature, baked per ring in generate.ts. At the top of a loop it
   // points at the outer wall, which is where the rider is pressed and where the
-  // film actually sheets; before this the loop's roof was dry and its floor wet.
+  // film actually sheets.
   const worldNormal = vertexStage(modelNormalMatrix.mul(normalLocal).normalize());
   const down = vertexStage(transformDirection(attribute("aDown", "vec3"), modelWorldMatrix));
   const wet = smoothstep(-0.15, 0.85, dot(worldNormal, down));
@@ -133,14 +134,22 @@ export function createTubeMaterial(
 
   // Wall seen through the film: the streak map sampled with a normal-driven offset.
   const wallUV = vec2(uv().x.mul(length / STREAK_TILE), uv().y.mul(2)).add(tn.xy.mul(0.06).mul(wet));
-  const wallColor = texture(streak, wallUV).rgb.mul(color(palette.tube));
-  const filmTint = mix(vec3(1), color(palette.water).mul(1.3), wet.mul(0.35));
+  const wallColor = texture(streak, wallUV).rgb.mul(color(theme.tube));
+  const filmTint = mix(vec3(1), color(theme.water).mul(1.3), wet.mul(film.tint));
 
-  const mat = new THREE.MeshPhysicalNodeMaterial({ side: THREE.BackSide, metalness: 0.05 });
+  const mat = new THREE.MeshPhysicalNodeMaterial({
+    side: THREE.BackSide,
+    metalness: film.metalness,
+    emissive: new THREE.Color(theme.tube),
+    emissiveIntensity: film.glow,
+  });
   mat.colorNode = wallColor.mul(filmTint);
-  mat.normalNode = normalMap(tn.mul(0.5).add(0.5), vec2(mix(float(0.15), float(0.7), wet)));
-  mat.roughnessNode = mix(float(0.5), float(0.1), wet);
-  mat.anisotropyNode = vec2(wet.mul(0.9).add(0.001), 0.001);
+  mat.normalNode = normalMap(
+    tn.mul(0.5).add(0.5),
+    vec2(mix(float(film.normalDry), float(film.normalWet), wet)),
+  );
+  mat.roughnessNode = mix(float(film.dry), float(film.wet), wet);
+  mat.anisotropyNode = vec2(wet.mul(film.streak).add(0.001), 0.001);
   mat.anisotropy = 1;
   flows.set(mat, uFlow);
   return mat;
@@ -152,22 +161,22 @@ export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
   if (flow) flow.value += FILM_FLOW * Math.max(0, speed) * dt;
 }
 
-export function createRingMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+export function createRingMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
   return new THREE.MeshStandardNodeMaterial({
-    color: palette.ring,
+    color: theme.ring,
     roughness: 0.35,
     metalness: 0.15,
-    emissive: new THREE.Color(palette.ring),
-    emissiveIntensity: 0.18,
+    emissive: new THREE.Color(theme.ring),
+    emissiveIntensity: theme.film.ringGlow,
   });
 }
 
-export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+export function createWaterMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial({
-    color: palette.water,
+    color: theme.water,
     roughness: 0.12,
     metalness: 0.28,
-    emissive: new THREE.Color(palette.water),
+    emissive: new THREE.Color(theme.water),
     emissiveIntensity: 0.32,
     transparent: true,
     opacity: 0.9,
@@ -187,14 +196,14 @@ export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMat
  * a little emissive, so refraction and Beer-Lambert absorption have something
  * to bend and something to eat.
  */
-export function createPoolFloorMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+export function createPoolFloorMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
   return new THREE.MeshStandardNodeMaterial({
-    color: palette.wall,
+    color: theme.wall,
     map: floorTexture(),
-    roughness: 0.85,
+    roughness: theme.pool.floorRough,
     metalness: 0.02,
-    emissive: new THREE.Color(palette.water),
-    emissiveIntensity: 0.1,
+    emissive: new THREE.Color(theme.water),
+    emissiveIntensity: theme.pool.floorGlow,
   });
 }
 
@@ -209,19 +218,18 @@ function floorTexture(): THREE.CanvasTexture {
 }
 
 /**
- * The pool wall. Now that the surface reflects it at grazing angles and
- * refracts through it below the water line, a flat unlit colour reads as a
- * black void: it carries the streak map and a little emissive of its own so
- * there is something in the reflection to see.
+ * The pool wall. The surface reflects it at grazing angles and refracts through
+ * it below the water line, so it carries the streak map and a little emissive
+ * of its own: a flat unlit colour reads as a black void.
  */
-export function createWallMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+export function createWallMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
   return new THREE.MeshStandardNodeMaterial({
-    color: palette.wall,
+    color: theme.wall,
     map: wallTexture(),
-    roughness: 0.72,
-    metalness: 0.04,
-    emissive: new THREE.Color(palette.wall),
-    emissiveIntensity: 0.22,
+    roughness: theme.pool.wallRough,
+    metalness: theme.pool.wallMetal,
+    emissive: new THREE.Color(theme.wall),
+    emissiveIntensity: theme.pool.wallGlow,
     side: THREE.DoubleSide,
   });
 }
@@ -238,32 +246,32 @@ function wallTexture(): THREE.CanvasTexture {
 
 /** Exit mouth: the tube material, film included, lit from inside so the hole reads from across the pool. */
 export function createMouthMaterial(
-  palette: Palette,
+  theme: Theme,
   length = 9,
   radius = 2.75,
 ): THREE.MeshPhysicalNodeMaterial {
-  const mat = createTubeMaterial(palette, length, radius);
-  mat.emissive = new THREE.Color(palette.accent);
-  mat.emissiveIntensity = 0.16;
+  const mat = createTubeMaterial(theme, length, radius);
+  mat.emissive = new THREE.Color(theme.accent);
+  mat.emissiveIntensity = theme.exit.mouth;
   return mat;
 }
 
-export function createExitRingMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+export function createExitRingMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
   return new THREE.MeshStandardNodeMaterial({
-    color: palette.accent,
+    color: theme.accent,
     roughness: 0.25,
     metalness: 0.1,
-    emissive: new THREE.Color(palette.accent),
-    emissiveIntensity: 1.2,
+    emissive: new THREE.Color(theme.accent),
+    emissiveIntensity: theme.exit.glow,
   });
 }
 
-export function createCurrentMaterial(palette: Palette): THREE.MeshBasicNodeMaterial {
+export function createCurrentMaterial(theme: Theme): THREE.MeshBasicNodeMaterial {
   const mat = new THREE.MeshBasicNodeMaterial({
-    color: palette.ring,
+    color: theme.ring,
     map: currentTexture(),
     transparent: true,
-    opacity: 0.38,
+    opacity: theme.exit.current,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,

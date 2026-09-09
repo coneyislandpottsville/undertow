@@ -16,10 +16,10 @@ import {
   createTubeMaterial,
   createWallMaterial,
   createWaterMaterial,
-  paletteAt,
   scrollCurrents,
   scrollTube,
-  type Palette,
+  themeAt,
+  type Theme,
 } from "./materials";
 
 export type Exit = {
@@ -39,7 +39,7 @@ export type PoolData = {
 export type RideSection = {
   id: number;
   seed: number;
-  palette: Palette;
+  theme: Theme;
   path: PathData;
   pool: PoolData;
   exits: Exit[];
@@ -375,12 +375,12 @@ function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exi
   return exits;
 }
 
-function addRings(group: THREE.Group, path: PathData, palette: Palette, geometries: THREE.BufferGeometry[], materials: THREE.Material[]) {
+function addRings(group: THREE.Group, path: PathData, theme: Theme, geometries: THREE.BufferGeometry[], materials: THREE.Material[]) {
   const spacing = 5.2;
   const count = Math.max(0, Math.floor((path.length - 12) / spacing));
   if (count < 1) return;
   const geo = new THREE.TorusGeometry(path.radius - 0.05, 0.055, 5, 20);
-  const mat = createRingMaterial(palette);
+  const mat = createRingMaterial(theme);
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   mesh.frustumCulled = false;
   const dummy = new THREE.Object3D();
@@ -410,7 +410,7 @@ function addMouth(
   exit: Exit,
   pool: PoolData,
   radius: number,
-  palette: Palette,
+  theme: Theme,
   geometries: THREE.BufferGeometry[],
   materials: THREE.Material[],
 ): ExitVisual {
@@ -426,7 +426,7 @@ function addMouth(
   geo.computeTangents();
   // A mouth is short and level: apparent gravity there is plain gravity.
   addApparentDown(geo, 12, 10, () => DOWN);
-  const mat = createMouthMaterial(palette, 9, radius);
+  const mat = createMouthMaterial(theme, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   group.add(mesh);
@@ -434,7 +434,7 @@ function addMouth(
   materials.push(mat);
 
   const ringGeo = new THREE.TorusGeometry(radius + 0.3, 0.13, 8, 40);
-  const ringMat = createExitRingMaterial(palette);
+  const ringMat = createExitRingMaterial(theme);
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.position.copy(exit.position).addScaledVector(outward, -0.3);
   ring.position.y += 0.25;
@@ -443,7 +443,7 @@ function addMouth(
   geometries.push(ringGeo);
   materials.push(ringMat);
 
-  const light = new THREE.PointLight(palette.accent, 2.4, 18, 1.5);
+  const light = new THREE.PointLight(theme.accent, theme.exit.light, 18, 1.5);
   light.position.copy(exit.position).addScaledVector(outward, -1.2);
   light.position.y += 1.5;
   group.add(light);
@@ -470,7 +470,7 @@ function addMouth(
   const vRepeat = from.distanceTo(to) / 3.2;
   stripGeo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, vRepeat, 0, vRepeat]), 2));
   stripGeo.setIndex([0, 1, 2, 0, 2, 3]);
-  const stripMat = createCurrentMaterial(palette);
+  const stripMat = createCurrentMaterial(theme);
   const strip = new THREE.Mesh(stripGeo, stripMat);
   strip.renderOrder = 3;
   strip.frustumCulled = false;
@@ -485,7 +485,7 @@ function assembleMeshes(
   path: PathData,
   pool: PoolData,
   exits: Exit[],
-  palette: Palette,
+  theme: Theme,
 ): Pick<RideSection, "group" | "water" | "tick" | "dispose"> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
@@ -498,21 +498,21 @@ function assembleMeshes(
   // derivative fallback is skewed by the tube's long, thin uv parametrisation.
   tubeGeo.computeTangents();
   addApparentDown(tubeGeo, tubular, 10, (u) => sampleApparentDown(path, u * path.length));
-  const tubeMat = createTubeMaterial(palette, path.length, path.radius);
+  const tubeMat = createTubeMaterial(theme, path.length, path.radius);
   const tube = new THREE.Mesh(tubeGeo, tubeMat);
   tube.frustumCulled = false;
   group.add(tube);
   geometries.push(tubeGeo);
   materials.push(tubeMat);
 
-  addRings(group, path, palette, geometries, materials);
+  addRings(group, path, theme, geometries, materials);
 
   // The basin runs from the lip down past the throat of the whirlpool funnel,
   // so the vortex never pokes through the floor and refraction has a closed
   // bowl to look into rather than the void beyond an open-sided cylinder.
   const wallHeight = BASIN_DEPTH + 4.3;
   const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 48, 1, true);
-  const wallMat = createWallMaterial(palette);
+  const wallMat = createWallMaterial(theme);
   const wall = new THREE.Mesh(wallGeo, wallMat);
   wall.position.copy(pool.center);
   wall.position.y = pool.waterY + 4.3 - wallHeight / 2;
@@ -529,7 +529,7 @@ function assembleMeshes(
   geometries.push(lipGeo);
 
   const waterGeo = new THREE.CircleGeometry(pool.radius - 0.05, 48);
-  const waterMat = createWaterMaterial(palette);
+  const waterMat = createWaterMaterial(theme);
   const water = new THREE.Mesh(waterGeo, waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.copy(pool.center);
@@ -542,7 +542,7 @@ function assembleMeshes(
   // The floor is under the water now that the surface refracts, so it gets its
   // own lit material and a light of its own; the wall material left it black.
   const floorGeo = new THREE.CircleGeometry(pool.radius + 1.2, 32);
-  const floorMat = createPoolFloorMaterial(palette);
+  const floorMat = createPoolFloorMaterial(theme);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(pool.center);
@@ -553,17 +553,17 @@ function assembleMeshes(
   materials.push(floorMat);
 
   for (const exit of exits) {
-    exitVisuals.push(addMouth(group, exit, pool, path.radius, palette, geometries, materials));
+    exitVisuals.push(addMouth(group, exit, pool, path.radius, theme, geometries, materials));
   }
 
-  const light = new THREE.PointLight(palette.accent, 2.4, pool.radius * 3.2, 1.3);
+  const light = new THREE.PointLight(theme.accent, theme.light.pool, pool.radius * 3.2, 1.3);
   light.position.copy(pool.center);
   light.position.y = pool.waterY + 3.5;
   group.add(light);
 
   // A second, dimmer lamp under the surface, so refraction and absorption have
   // a lit basin to read against instead of a black one.
-  const deep = new THREE.PointLight(palette.water, 3.2, pool.radius * 2.6, 1.1);
+  const deep = new THREE.PointLight(theme.water, theme.light.deep, pool.radius * 2.6, 1.1);
   deep.position.copy(pool.center);
   deep.position.y = pool.waterY - BASIN_DEPTH * 0.55;
   group.add(deep);
@@ -575,12 +575,13 @@ function assembleMeshes(
       scrollTube(tubeMat, dt, speed);
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
-        (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
-        v.light.intensity = 1.6 + pulse * 1.6;
+        (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity =
+          theme.exit.glow + pulse * theme.exit.pulse;
+        v.light.intensity = theme.exit.light + pulse * theme.exit.lightPulse;
         // The vortex draws the whole surface down and the strips are flat
         // quads on the still water line, so a running whirlpool leaves them
         // hanging in the air. They are a paddling cue anyway: fade them out.
-        v.strip.opacity = 0.38 * (1 - whirl);
+        v.strip.opacity = theme.exit.current * (1 - whirl);
       }
       scrollCurrents(dt);
     },
@@ -664,12 +665,12 @@ export function generateSection(
   );
   if (inward.lengthSq() < 1e-5) inward.copy(entrance);
   const exits = makeExits(pool, inward, rng);
-  const palette = paletteAt(dropIndex);
-  const meshes = assembleMeshes(path, pool, exits, palette);
+  const theme = themeAt(dropIndex);
+  const meshes = assembleMeshes(path, pool, exits, theme);
   return {
     id: nextId++,
     seed,
-    palette,
+    theme,
     path,
     pool,
     exits,

@@ -42,6 +42,7 @@ import {
 import type { Node } from "three/webgpu";
 import type { PoolData, RideSection } from "./generate";
 import { colorTargets } from "./materials";
+import type { Theme } from "./theme";
 
 type F = Node<"float">;
 type V2 = Node<"vec2">;
@@ -106,6 +107,11 @@ export type PoolSurfaceOptions = {
  * between the two, and sun and rider-light specular on top.
  */
 export type PoolSurface = {
+  /**
+   * Point the surface at a theme. `t` under 1 eases toward it, so a section
+   * change is a uniform swap rather than a rebuild.
+   */
+  setTheme: (theme: Theme, t?: number) => void;
   /** Move the rig onto this section's pool and take over its water disc. */
   attach: (section: RideSection) => void;
   /**
@@ -153,6 +159,9 @@ export function createPoolSurface(
   const uWake = uniform(new THREE.Vector3());
   /** x, z, radius, amplitude of one splash or droplet, spent in a single step. */
   const uImpulse = uniform(new THREE.Vector4(0, 0, 0.7, 0));
+  const uAbsorb = uniform(0.55);
+  const uFoamAmount = uniform(0.72);
+  const uGloss = uniform(260);
 
   // Throat width as a share of the pool radius. A strong vortex draws the whole
   // pool in; a dying one shrinks back to a dimple in the middle. The rider
@@ -347,7 +356,7 @@ export function createPoolSurface(
     .clamp(0, 1)
     .mul(uEnergy.mul(0.7).add(0.3))
     .mul(uEnergy.smoothstep(0, 0.12))
-    .mul(0.72);
+    .mul(uFoamAmount);
 
   // Down the throat the water goes to fog colour: a vortex core is aerated and
   // dark, not a window onto the basin floor. At rest there is no throat at all.
@@ -362,7 +371,7 @@ export function createPoolSurface(
   // behind the surface, minus the surface's own.
   const sceneLD = linearDepth(viewportDepthTexture(refrUV));
   const thickness = sceneLD.sub(linearDepth()).max(0).mul(cameraFar.sub(cameraNear));
-  const absorb = exp(thickness.mul(0.55).mul(waterTint.oneMinus()).negate());
+  const absorb = exp(thickness.mul(uAbsorb).mul(waterTint.oneMinus()).negate());
   // What the water scatters back on the way out; without it a dark basin makes
   // the pool a hole rather than a body of water.
   const refracted = behind.mul(absorb).add(waterTint.mul(absorb.oneMinus()).mul(0.72));
@@ -381,7 +390,7 @@ export function createPoolSurface(
 
   // The ride's key light and the rider's own lamp, as two specular lobes.
   const sunDir = normalize(vec3(18, 42, 12));
-  const specSun = pow(dot(normalWorld, normalize(view.add(sunDir))).max(0), 260).mul(1.4);
+  const specSun = pow(dot(normalWorld, normalize(view.add(sunDir))).max(0), uGloss).mul(1.4);
   const toRider = uRider.sub(positionWorld);
   const dRider = length(toRider);
   const att = float(6).div(dRider.mul(dRider).add(1));
@@ -429,21 +438,33 @@ export function createPoolSurface(
   let acc = 0;
   const pending: THREE.Vector4[] = [];
   const rgb = new THREE.Color();
-  const setColor = (u: { value: THREE.Vector3 }, hex: number) => {
+  const rgbVec = new THREE.Vector3();
+  const easeColor = (u: { value: THREE.Vector3 }, hex: number, t: number) => {
     rgb.set(hex);
-    u.value.set(rgb.r, rgb.g, rgb.b);
+    u.value.lerp(rgbVec.set(rgb.r, rgb.g, rgb.b), t);
+  };
+  const easeFloat = (u: { value: number }, target: number, t: number) => {
+    u.value += (target - u.value) * t;
+  };
+
+  const setTheme = (theme: Theme, t = 1) => {
+    easeColor(uThroat, theme.fog, t);
+    easeColor(uWater, theme.water, t);
+    easeColor(uFoam, theme.ring, t);
+    easeFloat(uAbsorb, theme.pool.absorb, t);
+    easeFloat(uFoamAmount, theme.pool.foam, t);
+    easeFloat(uGloss, theme.pool.gloss, t);
   };
 
   return {
+    setTheme,
     attach(section) {
       if (attached === section) return;
       if (attached) attached.water.visible = true;
       attached = section;
       pool = section.pool;
       section.water.visible = false;
-      setColor(uThroat, section.palette.fog);
-      setColor(uWater, section.palette.water);
-      setColor(uFoam, section.palette.ring);
+      setTheme(section.theme);
       uRadius.value = pool.radius;
       uCenter.value.set(pool.center.x, pool.waterY, pool.center.z);
       mesh.position.set(pool.center.x, pool.waterY, pool.center.z);

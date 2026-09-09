@@ -1,8 +1,8 @@
 import * as THREE from "three";
-import type { Palette } from "@/game/palette";
+import type { Theme } from "@/game/theme";
 
 /** Classic-renderer twin of shared-node.ts; kept separate so neither build imports the other. */
-export function addLights(scene: THREE.Scene, camera: THREE.Camera, palette: Palette) {
+export function addLights(scene: THREE.Scene, camera: THREE.Camera, theme: Theme) {
   scene.add(new THREE.HemisphereLight(0x9ad0dc, 0x081418, 1.15));
   const dir = new THREE.DirectionalLight(0xe2f2f6, 0.55);
   dir.position.set(18, 42, 12);
@@ -11,7 +11,7 @@ export function addLights(scene: THREE.Scene, camera: THREE.Camera, palette: Pal
   const rider = new THREE.PointLight(0xc8e8ee, 1.35, 28, 1.6);
   rider.position.set(0, 0.35, -1.1);
   camera.add(rider);
-  const accent = new THREE.PointLight(palette.accent, 2.4, 50, 1.3);
+  const accent = new THREE.PointLight(theme.accent, 2.4, 50, 1.3);
   accent.position.set(0, 3, 0);
   scene.add(accent);
   return { rider, accent, dir };

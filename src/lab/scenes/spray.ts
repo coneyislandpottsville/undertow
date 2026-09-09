@@ -34,7 +34,7 @@ import { addLights, applyRideFov, disposeAll } from "./shared-node";
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
-  const palette = params.palette;
+  const theme = params.theme;
   const R = 16;
   const N = Math.min(1_000_000, Math.max(1000, Math.floor(params.num("n", 50000))));
   const M = Math.max(0, Math.floor(params.num("mist", 48)));
@@ -44,14 +44,14 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const maxLife = 1.8;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  const { rider } = addLights(scene, camera, palette);
+  const { rider } = addLights(scene, camera, theme);
 
   const wallMat = new THREE.MeshStandardNodeMaterial({
-    color: palette.wall,
+    color: theme.wall,
     roughness: 0.72,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -62,10 +62,10 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const water = new THREE.Mesh(
     new THREE.CircleGeometry(R - 0.05, 64),
     new THREE.MeshStandardNodeMaterial({
-      color: palette.water,
+      color: theme.water,
       roughness: 0.15,
       metalness: 0.2,
-      emissive: new THREE.Color(palette.water),
+      emissive: new THREE.Color(theme.water),
       emissiveIntensity: 0.25,
     }),
   );
@@ -73,7 +73,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   scene.add(water);
   const lip = new THREE.Mesh(
     new THREE.TorusGeometry(R, 0.38, 8, 96),
-    new THREE.MeshStandardNodeMaterial({ color: palette.ring, roughness: 0.35, metalness: 0.15 }),
+    new THREE.MeshStandardNodeMaterial({ color: theme.ring, roughness: 0.35, metalness: 0.15 }),
   );
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
@@ -192,7 +192,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     mistMat.positionNode = mp.add(drift);
     mistMat.scaleNode = vec2(hash(instanceIndex.add(uint(11))).mul(1.5).add(2.5));
     const dM = length(uRider.sub(mp));
-    mistMat.colorNode = color(palette.ring).mul(float(1.35 * 6).div(dM.mul(dM).add(1)).add(0.15));
+    mistMat.colorNode = color(theme.ring).mul(float(1.35 * 6).div(dM.mul(dM).add(1)).add(0.15));
     const softMist = viewportLinearDepth
       .sub(linearDepth())
       .mul(cameraFar.sub(cameraNear))

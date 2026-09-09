@@ -52,24 +52,24 @@ const ZoomBlurShader = {
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;
-  const palette = params.palette;
+  const theme = params.theme;
   const radius = 2.75;
   const bloomOn = params.on("bloom", true);
   const blurOn = params.on("blur", true);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  addLights(scene, camera, palette);
+  addLights(scene, camera, theme);
 
   const curve = loopCurve();
   const L = curve.getLength();
   const streakTex = canvasTexture(streakCanvas(true));
   streakTex.repeat.set(L / 5, 2);
   const tubeMat = new THREE.MeshStandardMaterial({
-    color: palette.tube,
+    color: theme.tube,
     map: streakTex,
     roughness: 0.46,
     metalness: 0.08,
@@ -79,10 +79,10 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   scene.add(tube);
 
   const ringMat = new THREE.MeshStandardMaterial({
-    color: palette.accent,
+    color: theme.accent,
     roughness: 0.25,
     metalness: 0.1,
-    emissive: new THREE.Color(palette.accent),
+    emissive: new THREE.Color(theme.accent),
     emissiveIntensity: 1.2,
   });
   const ringGeo = new THREE.TorusGeometry(radius - 0.05, 0.13, 8, 40);
@@ -94,7 +94,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     ring.position.copy(curve.getPointAt(t));
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), curve.getTangentAt(t));
     scene.add(ring);
-    const light = new THREE.PointLight(palette.accent, 2.0, 18, 1.4);
+    const light = new THREE.PointLight(theme.accent, 2.0, 18, 1.4);
     light.position.copy(ring.position).addScaledVector(up, -0.5);
     scene.add(light);
   }

@@ -11,6 +11,7 @@ import { createSpray, sprayOptions, type Spray } from "./spray";
 import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
+import type { Theme } from "./theme";
 
 const FIXED = 1 / 60;
 const SIT = 1.05;
@@ -68,6 +69,14 @@ const _riderLight = new THREE.Vector3();
 const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
+const _themeColor = new THREE.Color();
+
+/** One step of a light toward a theme's colour and intensity; `t` of 1 snaps. */
+function easeLight(light: THREE.Light, hex: number, intensity: number, t: number) {
+  _themeColor.set(hex);
+  light.color.lerp(_themeColor, t);
+  light.intensity += (intensity - light.intensity) * t;
+}
 
 type Mode = RideMode;
 
@@ -104,6 +113,9 @@ export class Game {
   private readonly worldSeed: number;
   private readonly sections: RideSection[] = [];
   private readonly riderLight: THREE.PointLight;
+  private readonly hemi: THREE.HemisphereLight;
+  private readonly sun: THREE.DirectionalLight;
+  private readonly ambient: THREE.AmbientLight;
   private readonly cavern: THREE.Mesh;
   private readonly floatie: THREE.Mesh;
   /**
@@ -223,14 +235,15 @@ export class Game {
     this.scene.fog = new THREE.FogExp2(0x07181c, 0.012);
     this.scene.background = new THREE.Color(0x071318);
 
-    const hemi = new THREE.HemisphereLight(0x9ad0dc, 0x081418, 1.15);
-    this.scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xe2f2f6, 0.55);
-    dir.position.set(18, 42, 12);
-    this.scene.add(dir);
-    this.scene.add(new THREE.AmbientLight(0x6a8a92, 0.22));
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1);
+    this.sun.position.set(18, 42, 12);
+    this.scene.add(this.sun);
+    this.ambient = new THREE.AmbientLight(0xffffff, 1);
+    this.scene.add(this.ambient);
 
-    this.riderLight = new THREE.PointLight(0xc8e8ee, 1.35, 28, 1.6);
+    this.riderLight = new THREE.PointLight(0xffffff, 1, 28, 1.6);
     this.camera.add(this.riderLight);
     this.riderLight.position.set(0, 0.35, -1.1);
 
@@ -261,7 +274,7 @@ export class Game {
     this.placeOnTube();
     this.camera.position.copy(this.eye);
     this.camera.quaternion.copy(_frame.quat);
-    this.applyFog(this.current.palette.fog, 1);
+    this.applyTheme(this.current.theme, 1);
 
     this.input.attach();
     window.addEventListener("resize", this.onResize);
@@ -328,6 +341,9 @@ export class Game {
     const spray = sprayOptions(this.query);
     if (spray.count > 0) this.spray = createSpray(this.renderer, this.scene, spray);
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
+    // The shared rigs and the bloom exist only now, so the theme lands on them
+    // here rather than in the constructor.
+    this.applyTheme(this.current.theme, 1);
     this.running = true;
     this.clock.prev = performance.now();
     this.raf = requestAnimationFrame(this.loop);
@@ -400,10 +416,35 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  private applyFog(hex: number, t: number) {
+  /**
+   * Ease everything shared toward a theme: fog, background, the four lights,
+   * the bloom, and the pool and spray rigs. `t` of 1 snaps. The meshes a
+   * section owns carry the theme they were built with.
+   */
+  private applyTheme(theme: Theme, t: number) {
     const fog = this.scene.fog as THREE.FogExp2;
-    fog.color.lerp(new THREE.Color(hex), t);
+    _themeColor.set(theme.fog);
+    fog.color.lerp(_themeColor, t);
+    fog.density += (theme.fogDensity - fog.density) * t;
     (this.scene.background as THREE.Color).copy(fog.color);
+    this.renderer.setClearColor(fog.color, 1);
+
+    const light = theme.light;
+    easeLight(this.hemi, light.sky, light.hemi, t);
+    _themeColor.set(light.ground);
+    this.hemi.groundColor.lerp(_themeColor, t);
+    easeLight(this.sun, light.sun, light.sunIntensity, t);
+    easeLight(this.ambient, light.ambient, light.ambientIntensity, t);
+    easeLight(this.riderLight, light.lamp, light.lampIntensity, t);
+    this.riderLight.distance += (light.lampRange - this.riderLight.distance) * t;
+
+    if (this.post) {
+      const bloom = this.post.bloom;
+      bloom.strength.value += (theme.bloom.strength - bloom.strength.value) * t;
+      bloom.radius.value += (theme.bloom.radius - bloom.radius.value) * t;
+    }
+    this.poolSurface?.setTheme(theme, t);
+    this.spray?.setTheme(theme, t);
   }
 
   private tick() {
@@ -548,7 +589,7 @@ export class Game {
     this.audio.splash();
     this.poolSurface?.impulse(this.px, this.pz, 1.7, 0.5);
     _tmp.set(this.px, this.current.pool.waterY + 0.2, this.pz);
-    this.spray?.splash(_tmp, this.current.palette);
+    this.spray?.splash(_tmp);
     // The burst rains back down over the next second; ring each landing.
     this.dropTimer = 0.1;
     this.splashRain = 8;
@@ -761,7 +802,7 @@ export class Game {
     // not along the previous section's stale tangent.
     samplePath(next.path, this.dist, _frame);
     this.placeOnTube();
-    this.applyFog(next.palette.fog, 1);
+    this.applyTheme(next.theme, 1);
     this.prune(prev);
     useHud.getState().patch({
       mode: "slide",
