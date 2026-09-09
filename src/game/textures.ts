@@ -237,6 +237,96 @@ export function wallCanvases(seed = 7): WallMaps {
 }
 
 /**
+ * The rock the pool is cut into, as one tileable field.
+ *
+ * The pool's water is read through its basin — refracted by it, absorbed
+ * against its depth, lit by the caustics thrown onto it — so what the rock
+ * carries is the ceiling on how the water reads, and it was five noise
+ * evaluations a pixel across the most expensive phase of the ride. It is
+ * fields now, read once and weighted per theme, so a world can still be all
+ * strata or all erosion.
+ *
+ * Erosion in red and the grain over it in green, both about a half; the light
+ * a hollow loses in blue; and how far the rock is polished in alpha. Read at
+ * three sizes that never come round together, red is also the broad drift the
+ * strata wander on.
+ */
+export function basinCanvas(size = 512, seed = 41): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(size, size);
+  const erosion = new Float32Array(size * size);
+  const grain = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const v = (y + 0.5) / size;
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size;
+      const i = y * size + x;
+      erosion[i] = tiledFbm(u, v, 3, 3, seed, 3);
+      grain[i] = tiledFbm(u, v, 22, 22, seed + 5, 2);
+    }
+  }
+  // Relief is what both channels stand for together; the light a point loses is
+  // how far the rock around it stands above it, and the polish is the other
+  // side of that — a face that stands proud has been worn smooth, a hollow has
+  // not.
+  const relief = (x: number, y: number) => {
+    const i = ((y + size) % size) * size + ((x + size) % size);
+    return erosion[i]! * 0.72 + grain[i]! * 0.28;
+  };
+  const byte = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const z = relief(x, y);
+      const around =
+        (relief(x - 5, y) + relief(x + 5, y) + relief(x, y - 5) + relief(x, y + 5)) * 0.25;
+      const sunk = Math.max(0, around - z);
+      img.data[i] = byte(erosion[y * size + x]! + 0.5);
+      img.data[i + 1] = byte(grain[y * size + x]! + 0.5);
+      img.data[i + 2] = byte(1 - Math.min(0.45, sunk * 1.6));
+      img.data[i + 3] = byte(0.5 + z * 0.9);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/**
+ * Caustics as a tileable field of filaments: the lines a wavy surface focuses
+ * light into. Two reads of this at scales that drift against each other are the
+ * whole web, which is what the rock was paying two octaves of three-dimensional
+ * fractal noise a pixel for.
+ */
+export function causticCanvas(size = 256, seed = 29): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    const v = (y + 0.5) / size;
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size;
+      const i = (y * size + x) * 4;
+      // Where the field crosses zero is where the light lands. The field is
+      // driven well past ±1 so only a narrow band either side of a crossing is
+      // lit at all: a caustic is a line, not a haze.
+      const n = tiledFbm(u, v, 5, 5, seed, 3) * 6.5;
+      const filament = Math.pow(Math.max(0, 1 - Math.abs(n)), 3);
+      img.data[i] = Math.round(filament * 255);
+      img.data[i + 1] = 0;
+      img.data[i + 2] = 0;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/**
  * A tileable grain, for the scatter of bubbles a patch of foam closes up as the
  * water aerates. Two octaves in red and five times finer in green, so one fetch
  * carries both scales the foam is written across.
@@ -262,28 +352,8 @@ export function grainCanvas(size = 256, seed = 23): HTMLCanvasElement {
   return canvas;
 }
 
-/**
- * Tiling tangent-space normal map of small ripples: a seeded sum of sines,
- * differentiated with wrap-around so the tile never seams.
- */
-export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLCanvasElement {
-  const rng = new Rng(seed);
-  const waves: { kx: number; ky: number; amp: number; phase: number }[] = [];
-  for (let i = 0; i < 7; i++) {
-    const kx = Math.round(rng.range(-6, 6));
-    const ky = Math.round(rng.range(2, 9));
-    waves.push({ kx, ky, amp: rng.range(0.5, 1.0) / (i + 1.5), phase: rng.float() * Math.PI * 2 });
-  }
-  const height = new Float32Array(size * size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const u = (x / size) * Math.PI * 2;
-      const v = (y / size) * Math.PI * 2;
-      let h = 0;
-      for (const w of waves) h += w.amp * Math.sin(w.kx * u + w.ky * v + w.phase);
-      height[y * size + x] = h;
-    }
-  }
+/** A tiling height field differenced with wrap-around into a tangent-space normal. */
+function normalCanvas(height: Float32Array, size: number, strength: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -305,6 +375,58 @@ export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLC
   }
   ctx.putImageData(img, 0, 0);
   return canvas;
+}
+
+/** A seeded sum of sines on a wrapping lattice, as a height field. */
+function waveHeight(
+  size: number,
+  seed: number,
+  count: number,
+  pick: (rng: Rng, i: number) => { kx: number; ky: number },
+): Float32Array {
+  const rng = new Rng(seed);
+  const waves = Array.from({ length: count }, (_, i) => ({
+    ...pick(rng, i),
+    amp: rng.range(0.5, 1.0) / (i + 1.5),
+    phase: rng.float() * Math.PI * 2,
+  }));
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * Math.PI * 2;
+      const v = (y / size) * Math.PI * 2;
+      let h = 0;
+      for (const w of waves) h += w.amp * Math.sin(w.kx * u + w.ky * v + w.phase);
+      height[y * size + x] = h;
+    }
+  }
+  return height;
+}
+
+/**
+ * Tiling tangent-space normal map of small ripples, drawn out along the tube:
+ * what a film of water running down a wall makes.
+ */
+export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLCanvasElement {
+  const height = waveHeight(size, seed, 7, (rng) => ({
+    kx: Math.round(rng.range(-6, 6)),
+    ky: Math.round(rng.range(2, 9)),
+  }));
+  return normalCanvas(height, size, strength);
+}
+
+/**
+ * The same, with no direction to it: open water, which reads the same whichever
+ * way the rider is facing. Two reads of this are the pool's near-field chop,
+ * where three noise evaluations used to buy one slope.
+ */
+export function chopNormalCanvas(size = 256, seed = 17, strength = 1.0): HTMLCanvasElement {
+  const height = waveHeight(size, seed, 9, (rng) => {
+    const angle = rng.float() * Math.PI * 2;
+    const k = rng.range(2, 7);
+    return { kx: Math.round(Math.cos(angle) * k), ky: Math.round(Math.sin(angle) * k) };
+  });
+  return normalCanvas(height, size, strength);
 }
 
 /** Checker with soft seams so refraction and absorption have something to bend. */

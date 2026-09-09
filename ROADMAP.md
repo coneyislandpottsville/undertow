@@ -61,8 +61,8 @@ Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 7.5 ms of a 16.7 ms budget at 3440×1440 and the tube
-  phase 4.8, both with four samples. The post stack is four passes: the scene,
+- The pool phase costs 6.7 ms of a 16.7 ms budget at 3440×1440 and the tube
+  phase 5.6, both with four samples. The post stack is four passes: the scene,
   three for the glow, and the frame itself.
 - On the WebGL 2 backend the world's shaders are still built as they are drawn:
   the pool coming into view down each flume costs a stall of about two seconds.
@@ -83,10 +83,9 @@ Open:
   there is finer than 30 cm.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand.
-- The tube wall is authored but barely lit: on most themes `tube` is dark enough
-  that what the maps carry only reads in the near field and through the sheet.
-  The film's ripple normal is still a hand-rolled canvas, and so is the basin,
-  which is procedural noise end to end.
+- The tube wall and the basin are authored but barely lit: on most themes `tube`
+  and `wall` are dark enough that what the maps carry only reads in the near
+  field, through the sheet, and under the caustics.
 
 ## Phases
 
@@ -295,7 +294,30 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   release, and it is the page's first DOM raster in the GPU process rather than
   anything the ride does.
 
-- Step 6: the finite shader set. A material still bakes its theme, its flume's
+- Step 6 (PR #47): the basin. The pool's water is read through the rock it sits
+  in — refracted by it, absorbed against its depth, lit by the caustics thrown
+  onto it — and that rock was procedural noise end to end: fbm for the strata
+  and the erosion, noise for the grain and the warp, two octaves of
+  three-dimensional fractal noise for the caustics, across the most expensive
+  phase of the ride. It is authored now, the way the tube wall is: one tileable
+  field carrying erosion, grain, the light a hollow loses and how far the rock
+  is polished, read at three sizes; and one field of caustic filaments read at
+  two, the web being where two drifting copies cross. The theme still weights
+  the strata against the erosion against the grain, so a world can be all bands
+  or all rubble.
+
+  The wall is read in the cylinder's own axes now and the floor in world metres.
+  A field sampled at a world point smears vertically up a wall and the strata
+  were most of what hid it; the rock stands up the wall instead. Every wrap
+  count is coprime with every other and with the wall's sixty-four sides, or the
+  same patch of rock stands on every side of the pool.
+
+  The pool's own near-field detail went the same way: it was three noise
+  evaluations to difference one slope out of a height nothing else read, and a
+  normal map is a slope already, so it is two reads of an authored chop with
+  nothing differenced.
+
+- Step 7: the finite shader set. A material still bakes its theme, its flume's
   length and its radius in as constants, so no two sections share a shader.
   Those become uniforms and the set is one per theme, which is what makes the
   compile finite and stops most of `warm.ts` earning its place — including on

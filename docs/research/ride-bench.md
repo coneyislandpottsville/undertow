@@ -170,3 +170,9 @@ is the same loop at the refresh rate.
 | 9.5, the lump (Step 1) | pool | webgl | 185 (5.2) 75/46 | 119 (8.6) 249/31 |
 | 9.5, the lump (Step 1) | handoff | webgpu | 206 (0.5) 1577/13 | 123 (1.0) 1624/3 |
 | 9.5, the lump (Step 1) | handoff | webgl | 306 (3.4) 67/57 | 129 (11.7) 1663/39 |
+| 9.6, the basin (Step 2) | tube | webgpu | 337 (0.3) 123/15 | 206 (0.6) 216/9 |
+| 9.6, the basin (Step 2) | tube | webgl | 254 (4.7) 1111/49 | 170 (5.6) 1054/33 |
+| 9.6, the basin (Step 2) | pool | webgpu | 266 (0.2) 89/12 | 155 (0.4) 146/6 |
+| 9.6, the basin (Step 2) | pool | webgl | 244 (3.8) 23/1 | 166 (6.7) 108/67 |
+| 9.6, the basin (Step 2) | handoff | webgpu | 280 (0.3) 558/17 | 163 (0.5) 425/11 |
+| 9.6, the basin (Step 2) | handoff | webgl | 252 (4.4) 1110/48 | 139 (16.8) 1068/48 |

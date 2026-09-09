@@ -42,7 +42,7 @@ import type { Node } from "three/webgpu";
 import { fieldCopy } from "./field-copy";
 import { BASIN_DEPTH, type PoolData, type RideSection } from "./generate";
 import { GRAVITY } from "./physics";
-import { colorTargets, emissiveTarget, foamGrain } from "./materials";
+import { chopNormal, colorTargets, emissiveTarget, foamGrain } from "./materials";
 import type { Theme } from "./theme";
 import { atPassDepth, reachable } from "./warm";
 
@@ -206,6 +206,14 @@ const MOUTH_REACH = 20;
 const MOUTH_PULL = 1.1;
 /** What is left of that pull out in the middle of the pool, where every mouth is far. */
 const MOUTH_FAR = 0.55;
+/**
+ * The pool's near-field chop: metres per tile at each of the two scales it is
+ * read at, and how far each turns the surface.
+ */
+const CHOP_TILE = 3.2;
+const CHOP_FINE = 0.78;
+const CHOP_SLOPE = 0.14;
+const CHOP_FINE_SLOPE = 0.2;
 /** Square metres the rider's drag spreads over. */
 const PUSH_SPREAD = 4;
 
@@ -467,25 +475,31 @@ export function createPoolSurface(
 
   /**
    * Fine per-pixel detail, so the surface is not smooth between grid cells.
-   * Its slope costs three evaluations, so the noise is a plane the surface
-   * drifts under rather than a volume it evolves in: half the gradients, and
-   * detail that travels the way water does instead of fizzing in place.
+   *
+   * An authored chop read at two scales that do not come back round together,
+   * drifting the way water does. It is the slope that is wanted and a normal
+   * map is a slope, so nothing is differenced: the noise this replaces cost
+   * three evaluations to answer the same question once.
+   *
+   * The finer of the two is for the water within a few metres of the eye, which
+   * is most of the screen in the pool. It goes out with distance, where a pixel
+   * covers more of one ripple than the surface can hold still.
    */
-  const detail = (p: V2): F => {
-    // Two more ripples, a fifth of a metre across, for the water within a few
-    // metres of the eye — which is most of the screen in the pool and had
-    // nothing in it finer than a stride. They go out with distance, where a
-    // pixel covers more of one than the surface can hold still.
+  const detailSlope = (p: V2): V2 => {
     const near = smoothstep(10, 2.5, length(cameraPosition.sub(positionWorld)));
-    return sin(p.x.mul(2.6).sub(p.y.mul(2.1)).add(uTime.mul(2.9)))
-      .mul(0.016)
-      .add(mx_noise_float(p.mul(1.4).add(vec2(uTime.mul(0.34), uTime.mul(-0.21)))).mul(0.014))
-      .add(
-        sin(p.x.mul(21).sub(p.y.mul(15.4)).add(uTime.mul(6.2)))
-          .mul(0.0032)
-          .add(sin(p.x.mul(-12.7).sub(p.y.mul(24.1)).sub(uTime.mul(5.1))).mul(0.0026))
-          .mul(near),
-      );
+    const coarse = texture(
+      chopNormal(),
+      p.div(CHOP_TILE).add(vec2(uTime.mul(0.019), uTime.mul(-0.013))),
+    );
+    const fine = texture(
+      chopNormal(),
+      p.div(CHOP_FINE).add(vec2(uTime.mul(-0.07), uTime.mul(0.052))),
+    );
+    return coarse.xy
+      .mul(2)
+      .sub(1)
+      .mul(CHOP_SLOPE)
+      .add(fine.xy.mul(2).sub(1).mul(CHOP_FINE_SLOPE).mul(near));
   };
 
   /** Forward-difference slope of `f` about `p`, in metres per metre. */
@@ -723,7 +737,7 @@ export function createPoolSurface(
   // Slopes add, so one normal carries funnel, ripples, and per-pixel detail.
   const vertexSlope = vertexStage(funnelSlope.add(rippleSlope));
   const fragXZ = vec2(positionWorld.x.sub(uCenter.x), positionWorld.z.sub(uCenter.z));
-  const slope = vertexSlope.add(slopeOf(detail, fragXZ, 0.05));
+  const slope = vertexSlope.add(detailSlope(fragXZ));
   const normalWorld: V3 = vec3(slope.x.negate(), 1, slope.y.negate()).normalize();
 
   // ---- shading -------------------------------------------------------------
