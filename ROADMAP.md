@@ -85,10 +85,10 @@ Open:
   there is finer than 30 cm.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand.
-- The wall the water is seen through is three hand-rolled canvases: a streak, a
-  256-texel ripple normal, a 512-texel floor grid. The sheet's whole body is
-  that wall refracted, absorbed and mirrored back, so how good the water reads
-  is capped by it.
+- The tube wall is authored but barely lit: on most themes `tube` is dark enough
+  that what the maps carry only reads in the near field and through the sheet.
+  The film's ripple normal is still a hand-rolled canvas, and so is the basin,
+  which is procedural noise end to end.
 
 ## Phases
 
@@ -260,23 +260,35 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   is the wave they are trailing. And the hiss is the water they are in: a chute
   running white is heard as well as seen.
 
-- Step 4: the wall the water is seen through. The sheet's whole body is
-  `wallLook()`: the wall refracted by the ripples, absorbed by depth, and
-  mirrored back at grazing angles. It is being read through three hand-rolled
-  canvases, so that is the ceiling on how the water reads. Authored tileable
-  sets — albedo, normal, roughness, AO — sampled by the materials that already
-  sample canvases, and the procedural noise they replace comes out of the node
-  graphs.
+- Step 4 (PR #44): the wall the water is seen through. The sheet's whole body is
+  `wallLook()` — the wall refracted by the ripples, absorbed by depth, mirrored
+  back at grazing angles — and it was being read through one hand-rolled canvas
+  of soft gradients, so that was the ceiling on how the water reads. It is an
+  authored set now: albedo, a tangent-space normal, and roughness with ambient
+  occlusion packed beside it, every channel taken off one pair of tileable
+  fields so the tone in a groove, the normal that turns light out of it, the
+  gloss scuffed out of it and the light it loses are one feature. It is a
+  moulded flume, read at every range: flow lines pulled down its length and a
+  seam ring where two shells meet, both of them read from across a pool; the
+  orange peel of the moulding, the fine streaking of what has run down it and
+  the pinholes in its gelcoat, which is what there is to see with the wall a
+  metre from the eye. The tube material takes all three; the sheet takes the
+  albedo, which is all an unlit body of water reads.
 
-  With them, the theme's numbers and the flume's length and radius become
-  uniforms, so a section stops forking its own shaders and the set is one per
-  theme. That is what makes the compile finite, and most of `warm.ts` stops
-  earning its place — including on the WebGL 2 backend, where the warm-up does
-  not currently land at all. The hazard is that a material then outlives the
-  section that set it: the film's scroll, the rider's plough and the switch that
-  hands one sheet the flume's field are per-section state living on the
-  material, and a mouth's pulse is per-mouth. They move to an attribute or a
-  per-draw uniform first.
+  With a tileable grain authored beside them, the foam in both waters is a fetch
+  rather than the two or three noise evaluations it was costing per pixel: the
+  scatter of bubbles a patch closes up as it aerates is read at two scales that
+  do not come back round together inside a pool.
+
+- Step 5: the finite shader set. A material still bakes its theme, its flume's
+  length and its radius in as constants, so no two sections share a shader.
+  Those become uniforms and the set is one per theme, which is what makes the
+  compile finite and stops most of `warm.ts` earning its place — including on
+  the WebGL 2 backend, where the warm-up does not land at all. The hazard is
+  that a material then outlives the section that set it: the film's scroll, the
+  rider's plough and the switch that hands one sheet the flume's field are
+  per-section state living on the material, and a mouth's pulse is per-mouth.
+  They move to an attribute or a per-draw uniform first.
 
   Chase the WebGL warm-up only if this leaves it standing. The screen art wants
   authoring too, but that is themes as art and stays out.

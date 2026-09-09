@@ -19,7 +19,7 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { Node } from "three/webgpu";
 import type { LabParams, LabScene } from "../harness";
 import { createNodeRenderer } from "../node-renderer";
-import { streakCanvas } from "@/game/textures";
+import { wallCanvases } from "@/game/textures";
 import {
   addLights,
   applyRideFov,
@@ -70,7 +70,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
 
   const curve = loopCurve();
   const L = curve.getLength();
-  const streakTex = canvasTexture(streakCanvas(true));
+  const streakTex = canvasTexture(wallCanvases().albedo);
   streakTex.repeat.set(L / 5, 2);
   const tubeMat = new THREE.MeshStandardNodeMaterial({
     color: theme.tube,

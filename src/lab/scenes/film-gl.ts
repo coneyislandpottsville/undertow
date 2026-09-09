@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { LabParams, LabScene } from "../harness";
 import { createGlRenderer } from "../gl-renderer";
-import { rippleNormalCanvas, streakCanvas } from "@/game/textures";
+import { rippleNormalCanvas, wallCanvases } from "@/game/textures";
 import {
   addLights,
   applyRideFov,
@@ -35,7 +35,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const geometry = new THREE.TubeGeometry(curve, 720, radius, 28, true);
   geometry.computeTangents();
 
-  const streakTex = canvasTexture(streakCanvas(true));
+  const streakTex = canvasTexture(wallCanvases().albedo);
   streakTex.repeat.set(L / 5, 2);
   const rippleTex = canvasTexture(rippleNormalCanvas(256, 11, 1.2));
   rippleTex.repeat.set(L / 2, circ / 2);

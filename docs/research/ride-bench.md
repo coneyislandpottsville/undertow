@@ -158,3 +158,9 @@ is the same loop at the refresh rate.
 | 9.2-9.3, the swell and the flume read back (Steps 2-3) | pool | webgl | 186 (5.2) 71/48 | 128 (8.6) 206/44 |
 | 9.2-9.3, the swell and the flume read back (Steps 2-3) | handoff | webgpu | 194 (0.3) 1565/12 | 113 (0.5) 2482/5 |
 | 9.2-9.3, the swell and the flume read back (Steps 2-3) | handoff | webgl | 314 (3.2) 68/52 | 121 (6.1) 1851/38 |
+| 9.4, the wall the water is seen through (Step 4) | tube | webgpu | 342 (0.3) 121/14 | 204 (0.6) 212/9 |
+| 9.4, the wall the water is seen through (Step 4) | tube | webgl | 350 (3.1) 145/51 | 199 (5.4) 279/37 |
+| 9.4, the wall the water is seen through (Step 4) | pool | webgpu | 229 (0.2) 107/10 | 133 (0.4) 169/6 |
+| 9.4, the wall the water is seen through (Step 4) | pool | webgl | 187 (5.2) 62/53 | 108 (8.8) 195/27 |
+| 9.4, the wall the water is seen through (Step 4) | handoff | webgpu | 208 (0.3) 1568/13 | 121 (0.5) 1578/9 |
+| 9.4, the wall the water is seen through (Step 4) | handoff | webgl | 306 (3.3) 67/50 | 156 (5.8) 748/48 |

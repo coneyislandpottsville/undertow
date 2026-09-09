@@ -6,7 +6,7 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import type { LabParams, LabScene } from "../harness";
 import { createGlRenderer } from "../gl-renderer";
-import { streakCanvas } from "@/game/textures";
+import { wallCanvases } from "@/game/textures";
 import {
   addLights,
   applyRideFov,
@@ -66,7 +66,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
 
   const curve = loopCurve();
   const L = curve.getLength();
-  const streakTex = canvasTexture(streakCanvas(true));
+  const streakTex = canvasTexture(wallCanvases().albedo);
   streakTex.repeat.set(L / 5, 2);
   const tubeMat = new THREE.MeshStandardMaterial({
     color: theme.tube,
