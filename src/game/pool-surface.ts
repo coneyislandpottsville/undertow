@@ -326,8 +326,8 @@ export type PoolSurface = {
   /**
    * Build an object's shaders and pipelines for the reflection, which draws the
    * world a second time into a target of its own with no MSAA and no MRT: a
-   * material warmed only for the frame's pass is built again the moment the
-   * pool it stands over comes into view.
+   * material warmed only for the frame's pass is built again the first time the
+   * water it stands over reflects it.
    */
   warm: (object: THREE.Object3D, depthOf: (camera: THREE.Camera) => number) => Promise<void>;
   info: () => { reflect: number };
@@ -787,7 +787,11 @@ export function createPoolSurface(
       const outerMrt = renderer.getMRT();
       renderer.setMRT(null);
       renderer.setRenderTarget(reflectionTarget);
-      const done = atPassDepth(renderer, depthOf(virtual), () =>
+      // The reflection is a render inside the pass that draws the scene, so it
+      // is one deeper than that pass. Asking the virtual camera its own depth
+      // means waiting for the first reflection to draw to learn it, and that
+      // draw is the whole world's shaders at once.
+      const done = atPassDepth(renderer, depthOf(camera) + 1, () =>
         reachable(object, () => renderer.compileAsync(object, virtual, scene)),
       );
       try {

@@ -164,3 +164,9 @@ is the same loop at the refresh rate.
 | 9.4, the wall the water is seen through (Step 4) | pool | webgl | 187 (5.2) 62/53 | 108 (8.8) 195/27 |
 | 9.4, the wall the water is seen through (Step 4) | handoff | webgpu | 208 (0.3) 1568/13 | 121 (0.5) 1578/9 |
 | 9.4, the wall the water is seen through (Step 4) | handoff | webgl | 306 (3.3) 67/50 | 156 (5.8) 748/48 |
+| 9.5, the lump (Step 1) | tube | webgpu | 341 (0.3) 132/15 | 203 (0.6) 214/9 |
+| 9.5, the lump (Step 1) | tube | webgl | 356 (3.2) 172/42 | 202 (5.2) 266/37 |
+| 9.5, the lump (Step 1) | pool | webgpu | 228 (0.2) 107/11 | 133 (0.4) 164/6 |
+| 9.5, the lump (Step 1) | pool | webgl | 185 (5.2) 75/46 | 119 (8.6) 249/31 |
+| 9.5, the lump (Step 1) | handoff | webgpu | 206 (0.5) 1577/13 | 123 (1.0) 1624/3 |
+| 9.5, the lump (Step 1) | handoff | webgl | 306 (3.4) 67/57 | 129 (11.7) 1663/39 |

@@ -10,12 +10,14 @@ type Internals = { _renderContexts?: Contexts };
  * A shader is cached against the render context it was built for, and the
  * renderer keeps one context per nesting depth: the frame's pass is a render
  * inside the pipeline's, and the reflection a render inside that. The depth is
- * read off the draw rather than counted.
+ * read off the draw rather than counted — but a compile calls this too, from
+ * outside any render, where the depth is -1. Recording that would aim the next
+ * warm-up at a context nothing draws with.
  */
 export function watchPassDepth(scene: THREE.Scene, depths: Map<THREE.Camera, number>) {
   scene.onBeforeRender = (renderer, _scene, camera) => {
     const depth = (renderer as unknown as Nested)._callDepth;
-    if (typeof depth === "number") depths.set(camera, depth);
+    if (typeof depth === "number" && depth >= 0) depths.set(camera, depth);
   };
 }
 
