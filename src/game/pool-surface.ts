@@ -106,6 +106,18 @@ const UNDER_RIPPLE = 9;
 const VISIBLE_MARGIN = 24;
 
 /**
+ * Layer for what the mirror does not draw.
+ *
+ * The planar reflector renders the whole scene a second time from the far side
+ * of the water. A cloud of additive sprites and the cavern shell cost that pass
+ * what they cost the frame and return nothing a reflection shows: the droplets
+ * are below the eye's threshold once halved and fogged, and the shell is
+ * already fog colour. Anything on this layer is invisible to the mirror's
+ * camera and to nothing else.
+ */
+export const UNREFLECTED = 1;
+
+/**
  * Foam: seconds for a patch to fade to a third of itself, and how fast each
  * kind of disturbance writes it, in coverage per second.
  */
@@ -268,6 +280,7 @@ function makeFieldTarget(): THREE.RenderTarget {
 export function createPoolSurface(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
+  camera: THREE.Camera,
   options: PoolSurfaceOptions,
 ): PoolSurface {
   const useSim = options.ripples === "field";
@@ -392,11 +405,16 @@ export function createPoolSurface(
 
   const analytic = (p: V2): F => waves(p).add(wakeRing(p));
 
-  /** Fine per-pixel detail, so the surface is not smooth between grid cells. */
+  /**
+   * Fine per-pixel detail, so the surface is not smooth between grid cells.
+   * Its slope costs three evaluations, so the noise is a plane the surface
+   * drifts under rather than a volume it evolves in: half the gradients, and
+   * detail that travels the way water does instead of fizzing in place.
+   */
   const detail = (p: V2): F =>
     sin(p.x.mul(2.6).sub(p.y.mul(2.1)).add(uTime.mul(2.9)))
       .mul(0.016)
-      .add(mx_noise_float(vec3(p.mul(1.4), uTime.mul(0.5))).mul(0.014));
+      .add(mx_noise_float(p.mul(1.4).add(vec2(uTime.mul(0.34), uTime.mul(-0.21)))).mul(0.014));
 
   /** Forward-difference slope of `f` about `p`, in metres per metre. */
   const slopeOf = (f: (p: V2) => F, p: V2, eps: number): V2 => {
@@ -551,8 +569,8 @@ export function createPoolSurface(
   // in world space at two scales, so it has structure at arm's length as well
   // as across the pool.
   const coverage = sampleField(fragXZ).z.mul(uFoamAmount);
-  const coarse = mx_noise_float(vec3(fragXZ.mul(2.2), uTime.mul(0.4)));
-  const fine = mx_noise_float(vec3(fragXZ.mul(7.5), uTime.mul(0.8)));
+  const coarse = mx_noise_float(fragXZ.mul(2.2).add(vec2(uTime.mul(0.12), uTime.mul(-0.08))));
+  const fine = mx_noise_float(fragXZ.mul(7.5).add(vec2(uTime.mul(-0.29), uTime.mul(0.2))));
   const grain = coarse.mul(1.1).add(fine.mul(0.7)).mul(0.5).add(0.5).clamp(0, 1);
   const foam = smoothstep(grain.mul(0.9), grain.mul(0.9).add(0.2), coverage).mul(FOAM_MAX);
   // Aerated water is lit water, not paint.
@@ -586,6 +604,7 @@ export function createPoolSurface(
     mirror.uvNode = mirror.uvNode!.add(distortion);
     mirrorTarget = mirror.target;
     reflection = mirror.rgb;
+    mirror.reflector.getVirtualCamera(camera).layers.disable(UNREFLECTED);
   }
 
   // The ride's key light and the rider's own lamp, as two specular lobes.

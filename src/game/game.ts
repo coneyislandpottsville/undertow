@@ -7,7 +7,12 @@ import { Input } from "./input";
 
 import { setScreenSource } from "./materials";
 import { createRidePost, type RidePost } from "./post";
-import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
+import {
+  UNREFLECTED,
+  createPoolSurface,
+  poolSurfaceOptions,
+  type PoolSurface,
+} from "./pool-surface";
 import { createSpray, sprayOptions, type Spray } from "./spray";
 import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
 import { seedFromQuery } from "./rng";
@@ -316,6 +321,7 @@ export class Game {
     this.renderer.toneMappingExposure = 1.05;
 
     this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
+    this.camera.layers.enable(UNREFLECTED);
     this.scene.add(this.camera);
     this.scene.fog = new THREE.FogExp2(0x07181c, 0.012);
     this.scene.background = new THREE.Color(0x071318);
@@ -336,6 +342,7 @@ export class Game {
     const cavernMat = new THREE.MeshBasicNodeMaterial({ color: 0x05090c, side: THREE.BackSide });
     this.cavern = new THREE.Mesh(cavernGeo, cavernMat);
     this.cavern.frustumCulled = false;
+    this.cavern.layers.set(UNREFLECTED);
     this.scene.add(this.cavern);
 
     const floatGeo = new THREE.TorusGeometry(0.4, 0.09, 8, 22);
@@ -433,6 +440,7 @@ export class Game {
     this.poolSurface = createPoolSurface(
       this.renderer,
       this.scene,
+      this.camera,
       poolSurfaceOptions(this.query),
     );
     this.poolSurface.attach(this.current);

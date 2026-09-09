@@ -1,6 +1,7 @@
 import * as THREE from "three/webgpu";
 import {
   Fn,
+  If,
   Loop,
   convertToTexture,
   cos,
@@ -28,19 +29,32 @@ type F = Node<"float">;
 type V2 = Node<"vec2">;
 type V4 = Node<"vec4">;
 
-/** Zoom blur toward the screen centre; strength scales the tap length, falloff spares the centre. */
+/** Taps the zoom blur spreads over when it is running. */
+const TAPS = 10;
+
+/**
+ * Zoom blur toward the screen centre; strength scales the tap length, falloff
+ * spares the centre. Strength is a uniform, so the whole draw takes one side of
+ * the branch: a still frame reads the picture once where a blurred one reads it
+ * ten times, and at rest in the pool the ten taps all land on the same texel
+ * anyway.
+ */
 const zoomBlur = Fn(([inputNode, strength, warp]: [V4, F, V2]) => {
   const tex = convertToTexture(inputNode);
   const uvNode = uv().add(warp);
   const dir = uvNode.sub(0.5);
   const falloff = smoothstep(0.05, 0.6, length(dir));
-  const taps = 10;
   const acc = vec4(0).toVar();
-  Loop({ start: int(0), end: int(taps), type: "int", condition: "<" }, ({ i }) => {
-    const s = float(i).div(taps).sub(0.5).mul(strength).mul(falloff);
-    acc.addAssign(tex.sample(uvNode.add(dir.mul(s))));
+  If(strength.greaterThan(0.0005), () => {
+    Loop({ start: int(0), end: int(TAPS), type: "int", condition: "<" }, ({ i }) => {
+      const s = float(i).div(TAPS).sub(0.5).mul(strength).mul(falloff);
+      acc.addAssign(tex.sample(uvNode.add(dir.mul(s))));
+    });
+    acc.divAssign(TAPS);
+  }).Else(() => {
+    acc.assign(tex.sample(uvNode));
   });
-  return acc.div(taps);
+  return acc;
 });
 
 export type RidePost = {
@@ -78,6 +92,10 @@ export function createRidePost(
   scenePass.setMRT(mrt({ output, emissive }));
   const colorNode = scenePass.getTextureNode("output");
   const glow = bloom(scenePass.getTextureNode("emissive"), 0.6, 0.4, 0);
+  // The bloom is a wide, soft halo, so it is built from a third of the frame
+  // rather than a half: five levels of separable blur are the stack's largest
+  // single cost and nothing in the picture resolves what they give up.
+  glow.setResolutionScale(1 / 3);
   const zoom = uniform(0);
   const under = uniform(0);
   const underColor = uniform(new THREE.Vector3(1, 1, 1));
