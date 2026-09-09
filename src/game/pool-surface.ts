@@ -821,6 +821,7 @@ export function createPoolSurface(
   mesh.rotation.x = -Math.PI / 2;
   mesh.renderOrder = 1;
   mesh.visible = false;
+  // The mesh lies in the XZ plane, so the target's local z is world height.
   if (mirrorTarget) mesh.add(mirrorTarget);
   scene.add(mesh);
 
@@ -972,6 +973,15 @@ export function createPoolSurface(
       mesh.visible = dx * dx + dz * dz < reach * reach;
       uEnergy.value = nextEnergy;
       uTime.value = elapsed;
+      // The mirror's plane is the water under the camera, not the pool's still
+      // level: inside the funnel those are metres apart, and a plane at the
+      // wrong one both mirrors the wrong water and — once the camera drops
+      // below it — leaves the reflector rendering the world from the far side
+      // of itself. Sat on the right one it turns itself off there instead,
+      // which costs nothing, because the underside never samples a reflection.
+      if (mirrorTarget) {
+        mirrorTarget.position.z = funnelHeight(Math.hypot(dx, dz), nextEnergy);
+      }
       if (!useSim) return;
       // Catching a fresh pool up runs whether or not it is on screen: it is
       // what the water was doing before the rider ever got there. A few steps a

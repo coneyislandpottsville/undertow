@@ -91,8 +91,16 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 6.2, reading the field back (Step 2) | tube | webgl | 326 (2.9) | 204 (4.9) |
 | 6.2, reading the field back (Step 2) | pool | webgpu | 167 (0.4) | 99 (0.6) |
 | 6.2, reading the field back (Step 2) | pool | webgl | 161 (5.2) | 103 (8.5) |
+| 6.3, hardening (Step 3) | tube | webgpu | 335 (0.5) | 206 (0.8) |
+| 6.3, hardening (Step 3) | tube | webgl | 327 (2.9) | 205 (4.8) |
+| 6.3, hardening (Step 3) | pool | webgpu | 164 (0.5) | 97 (0.6) |
+| 6.3, hardening (Step 3) | pool | webgl | 160 (5.1) | 103 (8.6) |
 
 Notes:
+
+- Build 6 Step 3 is inside run-to-run noise: seeding the splash costs nothing, and the reflection
+  it turns off is one the rider only sees from under the water. Draw calls in the pool go from 51
+  to 36 the moment the camera drops below the line, which is the mirror pass leaving.
 
 - Build 6 Step 2 is free on WebGPU and costs the WebGL 2 tier about 1 ms a frame in the pool,
   which is its pixel-buffer readback plus a 128² pass: 115 fps down to 103 at 3440x1440, against

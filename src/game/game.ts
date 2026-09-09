@@ -15,7 +15,7 @@ import {
 } from "./pool-surface";
 import { createSpray, sprayOptions, type Spray } from "./spray";
 import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
-import { seedFromQuery } from "./rng";
+import { Rng, forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 import { pinTheme, themeForSeed, type Theme } from "./theme";
 
@@ -88,6 +88,8 @@ const DRIFT = 1.2;
 /** Radius of the crater a rider punches into the pool, m, and drops raining back after. */
 const SPLASH_RADIUS = 2;
 const SPLASH_DROPS = 14;
+/** Forks the section's seed for the raining drops, so they are the run's, not the frame's. */
+const SPLASH_SALT = 0x5314;
 /** Bubbles a second off the rider while they are under. */
 const WAKE_BUBBLES = 1400;
 
@@ -910,11 +912,14 @@ export class Game {
     plan.push({ at: 0, x, z, radius: SPLASH_RADIUS, amplitude: 0.8, shape: 1, spray: "crown" });
     plan.push({ at: 0.3, x, z, radius: 0.65, amplitude: 0.5, shape: 0, spray: "column" });
     plan.push({ at: 0.62, x, z, radius: SPLASH_RADIUS * 0.8, amplitude: -0.2, shape: 1 });
+    // Where the drops land is part of the run, not of the frame: a seed lays
+    // down the same foam and the same ripples every time it is played.
+    const rng = new Rng(forkSeed(this.current.seed, SPLASH_SALT));
     for (let i = 0; i < SPLASH_DROPS; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = SPLASH_RADIUS * (0.6 + Math.random() * 2.2);
+      const a = rng.range(0, Math.PI * 2);
+      const r = SPLASH_RADIUS * rng.range(0.6, 2.8);
       plan.push({
-        at: 0.45 + Math.random() * 0.9,
+        at: rng.range(0.45, 1.35),
         x: x + Math.cos(a) * r,
         z: z + Math.sin(a) * r,
         radius: 0.35,
