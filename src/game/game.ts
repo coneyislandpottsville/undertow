@@ -409,7 +409,7 @@ export class Game {
     this.poolSurface = createPoolSurface(
       this.renderer,
       this.scene,
-      poolSurfaceOptions(this.query, this.backend),
+      poolSurfaceOptions(this.query),
     );
     this.poolSurface.attach(this.current);
     const spray = sprayOptions(this.query);
@@ -1082,7 +1082,17 @@ export class Game {
     if (!surface) return;
     this.riderLight.getWorldPosition(_riderLight);
     surface.setRiderLight(_riderLight);
-    surface.setFloatie(this.px, this.pz, this.mode !== "slide");
+    // How hard the rider is working the water they are sitting in, which is
+    // what writes foam behind them.
+    const stir =
+      this.mode === "whirl"
+        ? 0.5 + 0.5 * THREE.MathUtils.clamp(this.whirlEnergy, 0, 1)
+        : THREE.MathUtils.clamp(
+            Math.abs(this.input.getThrottle()) * 0.8 + Math.abs(this.speed) / 9,
+            0,
+            1.2,
+          );
+    surface.setFloatie(this.px, this.pz, this.mode !== "slide", stir);
     // Droplets from the splash raining back onto the pool. The particles live
     // on the GPU, so the rings come from the same clock rather than a readback.
     if (this.dropTimer >= 0) {
