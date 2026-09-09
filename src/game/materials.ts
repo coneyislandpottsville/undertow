@@ -34,6 +34,21 @@ import type { Palette } from "./palette";
 
 type V2 = Node<"vec2">;
 type V3 = Node<"vec3">;
+type V4 = Node<"vec4">;
+
+/**
+ * The colour attachment, under every name a target might give it.
+ *
+ * A material MRT that names no attachment the framebuffer actually has compiles
+ * to an empty fragment struct, which WGSL rejects. The post stack's pass names
+ * its colour texture `output`; the renderer's own framebuffer target and a
+ * plain RenderTarget (the pool's reflection) leave the name empty. Naming both
+ * keeps a material with an mrtNode drawable wherever it lands: with the post
+ * stack, with `?post=0`, and inside the reflection pass.
+ */
+export function colorTargets(color: V4): Record<string, V4> {
+  return { "": color, output: color };
+}
 
 /** Share of rider speed the film flows at along the wall; the rest of the speed streams past the rider. */
 const FILM_FLOW = 0.15;
@@ -151,18 +166,65 @@ export function createWaterMaterial(palette: Palette): THREE.MeshStandardNodeMat
     depthWrite: false,
   });
   // The emissive lifts the pool's colour; only a fifth of it should bloom, or
-  // the whole pool washes out around the exits.
-  mat.mrtNode = mrt({ emissive: emissive.mul(0.2) });
+  // the whole pool washes out around the exits. `output` is named alongside it
+  // so the fragment struct is never empty when the renderer draws without MRT.
+  mat.mrtNode = mrt({ ...colorTargets(output), emissive: emissive.mul(0.2) });
   return mat;
 }
 
+/**
+ * The basin floor, seen through the water. The wall material reads black down
+ * there; this one carries the wall's streaks at pool scale, a lighter tint, and
+ * a little emissive, so refraction and Beer-Lambert absorption have something
+ * to bend and something to eat.
+ */
+export function createPoolFloorMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
+  return new THREE.MeshStandardNodeMaterial({
+    color: palette.wall,
+    map: floorTexture(),
+    roughness: 0.85,
+    metalness: 0.02,
+    emissive: new THREE.Color(palette.water),
+    emissiveIntensity: 0.1,
+  });
+}
+
+let floorTex: THREE.CanvasTexture | null = null;
+
+/** The wall's streaks, tiled at pool scale. One texture for every basin. */
+function floorTexture(): THREE.CanvasTexture {
+  if (floorTex) return floorTex;
+  floorTex = repeatTexture(streakCanvas());
+  floorTex.repeat.set(3, 3);
+  return floorTex;
+}
+
+/**
+ * The pool wall. Now that the surface reflects it at grazing angles and
+ * refracts through it below the water line, a flat unlit colour reads as a
+ * black void: it carries the streak map and a little emissive of its own so
+ * there is something in the reflection to see.
+ */
 export function createWallMaterial(palette: Palette): THREE.MeshStandardNodeMaterial {
   return new THREE.MeshStandardNodeMaterial({
     color: palette.wall,
+    map: wallTexture(),
     roughness: 0.72,
     metalness: 0.04,
+    emissive: new THREE.Color(palette.wall),
+    emissiveIntensity: 0.22,
     side: THREE.DoubleSide,
   });
+}
+
+let wallTex: THREE.CanvasTexture | null = null;
+
+/** The wall's streaks at pool scale; shared by every basin. */
+function wallTexture(): THREE.CanvasTexture {
+  if (wallTex) return wallTex;
+  wallTex = repeatTexture(streakCanvas());
+  wallTex.repeat.set(6, 1);
+  return wallTex;
 }
 
 /** Exit mouth: the tube material, film included, lit from inside so the hole reads from across the pool. */
@@ -198,21 +260,13 @@ export function createCurrentMaterial(palette: Palette): THREE.MeshBasicNodeMate
     side: THREE.DoubleSide,
   });
   // Bloom reads the emissive target and an unlit strip writes none, so hand
-  // it the strip's own colour and alpha; the direct look is unchanged.
-  mat.mrtNode = mrt({ emissive: output });
+  // it the strip's own colour and alpha; the direct look is unchanged. The
+  // colour target is named too: a material MRT that names no target the
+  // framebuffer actually has compiles to an empty fragment struct, which is a
+  // WGSL error wherever the renderer draws without MRT (?post=0, and inside
+  // the pool's reflection pass).
+  mat.mrtNode = mrt({ ...colorTargets(output), emissive: output });
   return mat;
-}
-
-export function createWakeMaterial(): THREE.MeshBasicNodeMaterial {
-  return new THREE.MeshBasicNodeMaterial({
-    color: 0xcfe9ee,
-    map: softDotTexture(),
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-  });
 }
 
 let currentTex: THREE.CanvasTexture | null = null;

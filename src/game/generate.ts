@@ -11,6 +11,7 @@ import {
   createCurrentMaterial,
   createExitRingMaterial,
   createMouthMaterial,
+  createPoolFloorMaterial,
   createRingMaterial,
   createTubeMaterial,
   createWallMaterial,
@@ -47,13 +48,20 @@ export type RideSection = {
   water: THREE.Mesh;
   /**
    * Animate this section's cues; call once per frame for the section the rider
-   * is in. `speed` scrolls the tube's flow streaks (pass 0 outside the tube).
+   * is in. `speed` scrolls the tube's flow streaks (pass 0 outside the tube);
+   * `whirl` is the vortex's energy, which fades the surface-current strips.
    */
-  tick: (dt: number, elapsed: number, speed: number) => void;
+  tick: (dt: number, elapsed: number, speed: number, whirl: number) => void;
   dispose: () => void;
 };
 
-type ExitVisual = { ring: THREE.Mesh; light: THREE.PointLight; phase: number };
+type ExitVisual = {
+  ring: THREE.Mesh;
+  light: THREE.PointLight;
+  /** The surface-current strip's material, faded out while the vortex runs. */
+  strip: THREE.MeshBasicNodeMaterial;
+  phase: number;
+};
 
 type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
 
@@ -405,7 +413,8 @@ function addMouth(
   const to = pool.center.clone().addScaledVector(outward, pool.radius - 1.0);
   const right = new THREE.Vector3(outward.z, 0, -outward.x);
   const half = 0.9;
-  const y = pool.waterY + 0.07;
+  // Clear of the pool's own swell, which runs to about a tenth of a metre.
+  const y = pool.waterY + 0.16;
   const stripGeo = new THREE.BufferGeometry();
   stripGeo.setAttribute(
     "position",
@@ -430,7 +439,7 @@ function addMouth(
   geometries.push(stripGeo);
   materials.push(stripMat);
 
-  return { ring, light, phase: exit.index * 1.9 };
+  return { ring, light, strip: stripMat, phase: exit.index * 1.9 };
 }
 
 function assembleMeshes(
@@ -490,14 +499,17 @@ function assembleMeshes(
   geometries.push(waterGeo);
   materials.push(waterMat);
 
+  // The floor is under the water now that the surface refracts, so it gets its
+  // own lit material and a light of its own; the wall material left it black.
   const floorGeo = new THREE.CircleGeometry(pool.radius + 1.2, 32);
-  const floorMat = createWallMaterial(palette);
+  const floorMat = createPoolFloorMaterial(palette);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(pool.center);
   floor.position.y = pool.waterY - BASIN_DEPTH;
   group.add(floor);
   geometries.push(floorGeo);
+  materials.push(floorMat);
   materials.push(floorMat);
 
   for (const exit of exits) {
@@ -509,15 +521,26 @@ function assembleMeshes(
   light.position.y = pool.waterY + 3.5;
   group.add(light);
 
+  // A second, dimmer lamp under the surface, so refraction and absorption have
+  // a lit basin to read against instead of a black one.
+  const deep = new THREE.PointLight(palette.water, 3.2, pool.radius * 2.6, 1.1);
+  deep.position.copy(pool.center);
+  deep.position.y = pool.waterY - BASIN_DEPTH * 0.55;
+  group.add(deep);
+
   return {
     group,
     water,
-    tick: (dt, elapsed, speed) => {
+    tick: (dt, elapsed, speed, whirl) => {
       scrollTube(tubeMat, dt, speed);
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity = 0.5 + pulse * 1.3;
         v.light.intensity = 1.6 + pulse * 1.6;
+        // The vortex draws the whole surface down and the strips are flat
+        // quads on the still water line, so a running whirlpool leaves them
+        // hanging in the air. They are a paddling cue anyway: fade them out.
+        v.strip.opacity = 0.38 * (1 - whirl);
       }
       scrollCurrents(dt);
     },

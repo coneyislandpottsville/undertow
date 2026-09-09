@@ -27,8 +27,33 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 3.4, whirlpool funnel (Step 4) | tube | webgl | 374 (2.9) | 251 (4.4) |
 | 3.4, whirlpool funnel (Step 4) | pool | webgpu | 401 (1.6) | 257 (2.8) |
 | 3.4, whirlpool funnel (Step 4) | pool | webgl | 355 (2.6) | 234 (4.3) |
+| 3.5, pool reflection and ripples (Step 5) | tube | webgpu | 390 (1.6) | 238 (3.1) |
+| 3.5, pool reflection and ripples (Step 5) | tube | webgl | 376 (2.7) | 248 (4.3) |
+| 3.5, pool reflection and ripples (Step 5) | pool | webgpu | 249 (1.3) | 145 (2.2) |
+| 3.5, pool reflection and ripples (Step 5) | pool | webgl | 276 (4.2) | 178 (6.5) |
 
 Notes:
+
+- Step 5 costs the pool phase about 40% of its frame rate: 145 fps at 3440×1440 on WebGPU,
+  178 on the WebGL 2 tier, against a 60 fps budget. The bracketed GPU times understate it —
+  the reflection is a second scene render whose pass is not in the frame's timestamp bucket —
+  so read the frame time: 6.9 ms of a 16.7 ms budget on WebGPU, 5.6 ms on WebGL 2. The tube
+  phase is unchanged from step 4 within noise, which is the point of the visibility cut below.
+
+  Isolated on WebGPU at 2560×1080: with `?reflect=0` the pool phase runs 265 fps against 249,
+  so the half-resolution reflection pass is about 0.25 ms of the 4.0 ms frame. The rest is the
+  surface's own fragment work — reflection, refraction and depth samples plus two noise
+  evaluations per pixel — and the height field's six compute dispatches per frame.
+
+  The surface stops drawing more than 24 m outside the pool wall. It is alpha-tested to cut a
+  circle out of a square grid, and a discarding fragment shader gets no early-z, so before that
+  cut it shaded a full screen of hidden pool from inside the tube: the tube phase measured
+  238 fps at 2560×1080 instead of 390. The rider is enclosed in the tube until the splash, so
+  nothing is lost.
+
+  Knobs: `?ripples=analytic|compute` picks the tier (compute is the WebGPU default, analytic
+  the WebGL 2 one, and both run on either backend), `?reflect=0` to 1 scales the reflection
+  target, `?refract=0` drops the viewport refraction.
 
 - Step 4 replaces the flat whirl disc and the pool's flat disc with one 192×192 grid displaced
   into the vortex in the vertex stage. It costs 0.3 ms (2560×1080) to 0.5 ms (3440×1440) of GPU
