@@ -64,6 +64,12 @@ const PLUNGE_C = 2.6;
 /** Downward speed the splash drives into that spring, m/s: never less, never more. */
 const PLUNGE_MIN = 7;
 const PLUNGE_MAX = 12;
+/**
+ * How fast the seat follows the water under it, per second. A float has mass:
+ * fast enough to ride a swell, slow enough that a crown outruns it and washes
+ * over the rider instead of carrying them.
+ */
+const BOB_LAMBDA = 9;
 /** Metres of water the frame takes to change from air to under it. */
 const CROSS_BAND = 0.12;
 /** Degrees of vertical FOV given up under water. */
@@ -243,6 +249,8 @@ export class Game {
   private plungeVel = 0;
   /** 0 in air, 1 under the water line. */
   private submerged = 0;
+  /** How far the water under the rider stands above its still level, m, followed. */
+  private bob = 0;
   private wasUnder = false;
   /** Seconds of bubble plume left from going under. */
   private bubbleTime = 0;
@@ -437,15 +445,18 @@ export class Game {
     this.api.backend = this.backend;
     this.api.ready = true;
     this.resize();
-    this.poolSurface = createPoolSurface(
+    const surface = createPoolSurface(
       this.renderer,
       this.scene,
       this.camera,
       poolSurfaceOptions(this.query),
     );
-    this.poolSurface.attach(this.current);
+    this.poolSurface = surface;
+    surface.attach(this.current);
     const spray = sprayOptions(this.query);
-    if (spray.count > 0) this.spray = createSpray(this.renderer, this.scene, spray);
+    if (spray.count > 0) {
+      this.spray = createSpray(this.renderer, this.scene, spray, surface.waterLineNode);
+    }
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
     // The shared rigs and the bloom exist only now, so the theme lands on them
     // here rather than in the constructor.
@@ -638,7 +649,6 @@ export class Game {
     }
     this.audio.setSubmerged(this.submerged);
     surface?.setUnder(under);
-    this.spray?.setWaterLine(line);
     // Air comes down with the rider and is dragged along by them, so the plume
     // is emitted where they are rather than where they went in: at this speed
     // an anchored column is behind them within a few frames.
@@ -784,6 +794,17 @@ export class Game {
     this.plunge += this.plungeVel * dt;
   }
 
+  /**
+   * The rider sits on the water, so the waves and whatever the field is
+   * carrying under them lift the seat: their own crown, the ring that comes
+   * back off the wall, the swell. Followed rather than tracked, because a float
+   * has mass — and because lagging the crown is what lets it wash over them.
+   */
+  private updateBob(dt: number) {
+    const chop = this.poolSurface?.chopAt(this.px, this.pz, this.clock.elapsed) ?? 0;
+    this.bob = expDamp(this.bob, chop, BOB_LAMBDA, dt);
+  }
+
   private placeOnTube() {
     const c = Math.cos(this.bank);
     const s = Math.sin(this.bank);
@@ -857,9 +878,15 @@ export class Game {
     // throat as well as tightening the spiral, and the deepest, tightest part
     // of it rides low enough that the water washes over them.
     this.updatePlunge(dt);
+    this.updateBob(dt);
     const dip = tight * e * 0.4;
     this.py =
-      pool.waterY + (this.poolSurface?.heightAt(this.whirlR, e) ?? 0) + 0.55 - dip - this.plunge;
+      pool.waterY +
+      (this.poolSurface?.heightAt(this.whirlR, e) ?? 0) +
+      this.bob +
+      0.55 -
+      dip -
+      this.plunge;
     this.eye.set(this.px, this.py + 0.62, this.pz);
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
@@ -979,9 +1006,11 @@ export class Game {
     }
 
     this.updatePlunge(dt);
+    this.updateBob(dt);
     this.py =
       pool.waterY +
       (this.poolSurface?.heightAt(this.poolRadius(), this.whirlEnergy) ?? 0) +
+      this.bob +
       0.55 -
       this.plunge;
     this.eye.set(this.px, this.py + 0.58, this.pz);
@@ -1057,6 +1086,7 @@ export class Game {
     this.whirlEnergy = 0;
     this.plunge = 0;
     this.plungeVel = 0;
+    this.bob = 0;
     this.poolSurface?.attach(next);
     // The mouth was already dressed in this theme, so the tube the rider is now
     // in matches what they aimed at; the world around it catches up.
