@@ -669,8 +669,8 @@ export function createPoolSurface(
   if (mirrorTarget) mesh.add(mirrorTarget);
   scene.add(mesh);
 
-  // Wipe both halves of the ping-pong so the first frame reads zeros, not
-  // whatever the target was allocated over.
+  // Wipe both halves of the ping-pong: a target comes up holding whatever was
+  // in that memory.
   stepField(true);
   stepField(true);
 

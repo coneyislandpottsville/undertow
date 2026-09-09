@@ -41,7 +41,7 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 4, September 2026)
+## Where it stands (Build 5, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -85,13 +85,28 @@ and basin became rock with caustics; six themes; exits dressed in the theme
 they open into; a cross-fade at every hand-off; and art on the tube interior.
 Phase 3 is complete.
 
+Done in Build 5 (phase 5, PRs #20 to #24): the water. Going under is a place;
+foam is a quantity the water carries; the splash displaces a volume; the flume
+runs a sheet with a surface of its own; and the pool flows. The pool's height,
+its velocity and its foam live in one half-float target stepped by a
+full-screen pass, which is what let both backends have the same water: a
+compute kernel on the WebGL 2 backend reads its storage buffers back as zero,
+so that tier had no height field at all before this.
+
 Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 10.5 ms of a 16.7 ms budget at 3440x1440. The basin's
-  rock and caustics are five noise evaluations a pixel, drawn again in the
-  reflection pass; that is where to look first if a later step needs the room.
+- The pool phase costs 11.7 ms of a 16.7 ms budget at 3440x1440 and the tube
+  phase 5.0 ms. The basin's rock and caustics are five noise evaluations a
+  pixel, drawn again in the reflection pass; that is where to look first if a
+  later step needs the room.
+- The water line the game tests the camera against is the funnel and the waves,
+  not the field, so a splash wave washing over the eye does not read as going
+  under. It would need the field read back, or a coarse CPU copy of it.
+- The tube's sheet is baked per section: it stands where the section's nominal
+  speed says apparent gravity presses, and does not answer the rider's actual
+  speed, their bow wave, or a brake.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand: `?theme=` and `?screen=` are the
   only ways to pick one.
@@ -182,14 +197,13 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
   mist (`src/game/spray.ts`), two storage buffers and one kernel so the WebGL 2
   backend runs it as transform feedback; the film's wet band on apparent g
   (`src/game/physics.ts`, `apparentDown` in `path.ts`).
-- Budget met, and still met after Build 4: 95 fps in the pool phase and 220 in
-  the tube at 3440×1440 with MSAA 4× on WebGPU, 102 and 210 on the WebGL 2
-  tier, against 60. Per-step numbers in `docs/research/ride-bench.md`, which
-  measures both phases. WebGL 2 tier: analytic ripples instead of the height
-  field. Knobs: `?ripples=`, `?reflect=`, `?refract=`, `?spray=`, `?post=0`,
-  `?theme=`, `?screen=`, `?fade=`.
+- Budget met, and still met after Build 5: 85 fps in the pool phase and 200 in
+  the tube at 3440×1440 with MSAA 4× on WebGPU, 86 and 193 on the WebGL 2 tier,
+  against 60. Per-step numbers in `docs/research/ride-bench.md`, which measures
+  both phases. Both tiers run the same water. Knobs: `?ripples=`, `?reflect=`,
+  `?refract=`, `?foam=`, `?spray=`, `?post=0`, `?theme=`, `?screen=`, `?fade=`.
 
-### 5. The water (Build 5, in progress)
+### 5. The water (Build 5)
 
 The one goal until it is right: the water. Numbers per step in
 `docs/research/ride-bench.md`; every step lands on both tiers or writes down why

@@ -15,7 +15,7 @@ import {
   createSheetMaterial,
   createTubeMaterial,
   createWaterMaterial,
-  scrollCurrents,
+  tickMaterials,
   scrollTube,
   themeForSeed,
   type Theme,
@@ -681,7 +681,7 @@ function assembleMeshes(
           v.theme.exit.glow + pulse * v.theme.exit.pulse;
         v.light.intensity = v.theme.exit.light + pulse * v.theme.exit.lightPulse;
       }
-      scrollCurrents(dt);
+      tickMaterials(dt);
     },
     dispose: () => {
       group.removeFromParent();
