@@ -23,6 +23,7 @@ import {
   vec4,
   viewportLinearDepth,
 } from "three/tsl";
+import type { Node } from "three/webgpu";
 import { UNREFLECTED } from "./pool-surface";
 import type { Theme } from "./theme";
 
@@ -108,8 +109,6 @@ export type Spray = {
    * world point. They climb, wobble, and burst at the water line.
    */
   bubbles: (position: THREE.Vector3, spread: number, count: number) => void;
-  /** Where bubbles burst; the pool the rider is in sets it. */
-  setWaterLine: (y: number) => void;
   update: (dt: number, riderLight: THREE.Vector3) => void;
   info: () => { count: number };
   dispose: () => void;
@@ -119,6 +118,8 @@ export function createSpray(
   renderer: THREE.WebGPURenderer,
   scene: THREE.Scene,
   options: SprayOptions,
+  /** World height of the water over a point: where a bubble reaches air. */
+  waterLine: (world: Node<"vec3">) => Node<"float">,
 ): Spray {
   const N = options.count;
   const uDt = uniform(1 / 60);
@@ -134,9 +135,8 @@ export function createSpray(
   const uRadial = uniform(new THREE.Vector3(0, -1, 0));
   const uBinormal = uniform(new THREE.Vector3(1, 0, 0));
   const uSpeed = uniform(0);
-  /** How wide a bubble plume spawns, m, and the surface they burst at. */
+  /** How wide a bubble plume spawns, m. */
   const uSpread = uniform(0.6);
-  const uWaterY = uniform(-1000);
   /** Mist anchor and how much of it is left, 0 to 1. */
   const uMist = uniform(new THREE.Vector4(0, -1000, 0, 0));
   const uMistColor = uniform(new THREE.Vector3(1, 1, 1));
@@ -240,8 +240,10 @@ export function createSpray(
         v.mulAssign(float(1).sub(uDt.mul(0.6)));
       });
       const p = s.xyz.add(v.mul(uDt)).toVar();
-      // A bubble that reaches the surface bursts through it.
-      const popped = m.w.mul(p.y.step(uWaterY));
+      // A bubble that reaches the surface bursts through it. The surface is
+      // the pool's own, sampled where the bubble is: down the throat of a
+      // vortex it is metres below where it is at the rim.
+      const popped = m.w.mul(p.y.step(waterLine(p)));
       s.assign(vec4(p, mix(life, float(-1), popped)));
       m.assign(vec4(v, m.w));
     });
@@ -407,9 +409,6 @@ export function createSpray(
       bubbleAt.copy(position);
       bubbleSpread = spread;
       bubbleWanted += count;
-    },
-    setWaterLine(y) {
-      uWaterY.value = y;
     },
     splash(position, strength = 1, radius = 1.6) {
       burst = Math.round(BURST * strength);

@@ -87,8 +87,23 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 6.1, buying the budget back (Step 1) | tube | webgl | 329 (2.8) | 205 (4.6) |
 | 6.1, buying the budget back (Step 1) | pool | webgpu | 164 (0.4) | 98 (0.5) |
 | 6.1, buying the budget back (Step 1) | pool | webgl | 179 (4.2) | 115 (0.2) |
+| 6.2, reading the field back (Step 2) | tube | webgpu | 336 (0.5) | 208 (0.8) |
+| 6.2, reading the field back (Step 2) | tube | webgl | 326 (2.9) | 204 (4.9) |
+| 6.2, reading the field back (Step 2) | pool | webgpu | 167 (0.4) | 99 (0.6) |
+| 6.2, reading the field back (Step 2) | pool | webgl | 161 (5.2) | 103 (8.5) |
 
 Notes:
+
+- Build 6 Step 2 is free on WebGPU and costs the WebGL 2 tier about 1 ms a frame in the pool,
+  which is its pixel-buffer readback plus a 128² pass: 115 fps down to 103 at 3440x1440, against
+  60. One request is in flight at a time, so the copy lands a frame or two late.
+
+  Reading a target back does not go through a sampler and the two backends disagree about which
+  end of the texture the first row is. Measured against a splash at a known place — ride in, note
+  where the rider hit the water, scan the copy for the crown — the WebGL 2 tier hands the field
+  back upside down and WebGPU does not; the copy pass turns it over for that tier. The surface's
+  own read of the field stays pinned to one half of the ping-pong: following the latest step makes
+  the two halves visibly disagree.
 
 - Build 6 Step 1 buys the pool phase 1.6 ms a frame on WebGPU and 2.9 ms on the WebGL 2 tier,
   taking it from 85 to 98 fps and from 86 to 115 at 3440x1440. Where the frame went, measured by

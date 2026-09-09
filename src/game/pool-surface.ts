@@ -64,6 +64,28 @@ const ARMS = 3;
 /** Throat width as a share of pool radius, at zero and full energy. */
 const SIGMA_MIN = 0.2;
 const SIGMA_MAX = 0.54;
+/** Metres the field's height may reach either side of the still water line. */
+const FIELD_CLAMP = 1.2;
+/**
+ * What a metre of impulse amplitude is worth as a metre of water.
+ *
+ * An impulse is a one-step kick to the velocity, and the field integrates that
+ * for the quarter period of the feature it made — about ten steps at a couple
+ * of metres across — before its own curvature turns it round. Written raw, a
+ * splash asked for twenty metres of displacement, drove the height into its
+ * clamp, and stuck there: a clamped patch is level with its neighbours, so
+ * nothing restores it and it spreads for as long as the damping takes to bleed
+ * the velocity off. Amplitudes are in metres of water, and this is the rate.
+ */
+const IMPULSE_GAIN = 0.08;
+/**
+ * Texels per side of the copy of the field the CPU reads back.
+ *
+ * Forty-centimetre cells over the pool, which is finer than the crown of a
+ * splash and far finer than the ring it leaves. A row has to be a multiple of
+ * 256 bytes or the WebGPU copy pads it.
+ */
+const MIRROR = 128;
 /** Field step: wave speed and per-step damping at 60 Hz. */
 const WAVE_C = 0.4;
 const WAVE_DAMP = 0.995;
@@ -127,7 +149,7 @@ const FOAM_LIP = 1.2;
 const FOAM_WAKE = 0.35;
 const FOAM_INFLOW = 0.5;
 const FOAM_LAP = 0.7;
-const FOAM_SPLASH = 60;
+const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
 /** Never quite paints the water out: aerated water is still water. */
 const FOAM_MAX = 0.85;
@@ -227,10 +249,19 @@ export type PoolSurface = {
    */
   slopeAt: (r: number, energy: number) => number;
   /**
-   * World height of the surface over world x/z, funnel and waves together.
-   * What the camera is tested against to decide it has gone under.
+   * World height of the surface over world x/z: funnel, waves and whatever the
+   * field is carrying there. What the camera is tested against to decide it has
+   * gone under, so a splash wave or a crown washing over the eye counts.
    */
   waterLineAt: (x: number, z: number, energy: number, elapsed: number) => number;
+  /**
+   * How far the water stands above its still level at a world point, funnel
+   * excluded: the waves and the field. What lifts a floating rider, so their
+   * own splash and the ring off the wall carry them.
+   */
+  chopAt: (x: number, z: number, elapsed: number) => number;
+  /** The water line as a shader node, for rigs that need it per particle. */
+  waterLineNode: (world: Node<"vec3">) => Node<"float">;
   /** Tell the surface which side of itself the camera is on. */
   setUnder: (under: boolean) => void;
   /** How hard the rider is dragging the water they are in, in m/s. */
@@ -470,7 +501,7 @@ export function createPoolSurface(
     const q = dImp.div(uImpulse.z);
     const dome = exp(q.mul(q).negate());
     const crown = q.mul(q).mul(2).sub(1).mul(dome).mul(2.24);
-    const imp = mix(dome, crown, uImpulseShape).mul(uImpulse.w);
+    const imp = mix(dome, crown, uImpulseShape).mul(uImpulse.w).mul(IMPULSE_GAIN);
     // The floatie presses a shallow dish into the surface; as it moves the dish
     // springs back and leaves a wake behind it. The water it is sitting in is
     // damped as well as sprung, or the dish drives itself to the clamp and the
@@ -479,8 +510,14 @@ export function createPoolSurface(
     const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
     const under = exp(dWake.mul(dWake).div(2).negate());
     const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
-    const vel = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
-    const height = here.x.add(vel).mul(inside).clamp(-1.2, 1.2);
+    const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
+    const raw = here.x.add(moved);
+    const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
+    // Whatever the limit took off the height comes off the velocity with it,
+    // the way hitting a wall spends the speed that hit it. Kept, it would go on
+    // pushing against a limit that cannot push back.
+    const vel = moved.sub(raw.sub(limited));
+    const height = limited.mul(inside);
 
     // Foam is carried the same way, so the spiral arms of a whirlpool are a
     // ring of foam at the lip being drawn out rather than a pattern painted in
@@ -513,6 +550,14 @@ export function createPoolSurface(
   fieldScene.add(fieldQuad);
   const fieldCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
+  /**
+   * The field as everything downstream reads it: always the same half of the
+   * ping-pong, which is the last step on an even count and the one before it on
+   * an odd one. A sixtieth of a second of lag, alternating, and nothing sees the
+   * two halves disagree.
+   */
+  const uField = texture(rt[0].texture);
+
   /** Advance the field by one step, or wipe it. */
   const stepField = (clear = false) => {
     uClear.value = clear ? 1 : 0;
@@ -524,7 +569,98 @@ export function createPoolSurface(
   };
 
   /** The field as the surface reads it: height and foam at a plane point. */
-  const sampleField = (p: V2) => texture(rt[0].texture, fieldUV(p));
+  const sampleField = (p: V2) => uField.sample(fieldUV(p));
+
+  // ---- the copy the game reads ---------------------------------------------
+  // The ride has to know where the water is to play on it: whether a wave has
+  // washed over the eye, how far a splash lifts the rider, where a bubble
+  // reaches air. The field is a texture, so a small pass writes its height into
+  // a byte target and that is read back asynchronously, one request in flight.
+  // Sixteen bits across the field's own clamp is finer than the water ever
+  // moves, and the read lands a frame or two late, which against water is
+  // nothing.
+  //
+  // Reading a target back does not go through a sampler, and the two backends
+  // disagree about which end of the texture the first row is. Measured against a
+  // splash at a known place: the WebGL 2 tier hands the field back upside down
+  // and WebGPU does not. The pass writes it the way up the reader expects, so
+  // nothing above here has to know.
+  const uReadFlip = uniform(
+    (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 0 : 1,
+  );
+  const mirrorMat = new THREE.MeshBasicNodeMaterial();
+  {
+    const q = uField
+      .sample(vec2(uv().x, mix(uv().y, uv().y.oneMinus(), uReadFlip)))
+      .x.add(FIELD_CLAMP)
+      .div(FIELD_CLAMP * 2)
+      .clamp(0, 1)
+      .mul(65535);
+    const high = q.div(256).floor();
+    mirrorMat.colorNode = vec4(high.div(255), q.sub(high.mul(256)).div(255), 0, 1);
+  }
+  const mirrorRT = new THREE.RenderTarget(MIRROR, MIRROR, {
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+  const mirrorQuad = new THREE.Mesh(fieldQuad.geometry, mirrorMat);
+  mirrorQuad.frustumCulled = false;
+  const mirrorScene = new THREE.Scene();
+  mirrorScene.add(mirrorQuad);
+  let mirror: Uint8Array | null = null;
+  let mirrorBusy = false;
+
+  const readMirror = () => {
+    if (mirrorBusy) return;
+    mirrorBusy = true;
+    renderer.setRenderTarget(mirrorRT);
+    renderer.render(mirrorScene, fieldCamera);
+    renderer.setRenderTarget(null);
+    void renderer
+      .readRenderTargetPixelsAsync(mirrorRT, 0, 0, MIRROR, MIRROR)
+      .then((data) => {
+        mirror = data as Uint8Array;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        mirrorBusy = false;
+      });
+  };
+
+  /** What the field is carrying at a plane point, m. Zero until the first read lands. */
+  const fieldHeight = (px: number, pz: number): number => {
+    const data = mirror;
+    if (!data) return 0;
+    const u = (px / (PLANE_HALF * 2) + 0.5) * MIRROR - 0.5;
+    const v = (pz / (PLANE_HALF * 2) + 0.5) * MIRROR - 0.5;
+    const x0 = Math.floor(u);
+    const y0 = Math.floor(v);
+    const fx = u - x0;
+    const fy = v - y0;
+    const texel = (x: number, y: number) => {
+      const cx = x < 0 ? 0 : x > MIRROR - 1 ? MIRROR - 1 : x;
+      const cy = y < 0 ? 0 : y > MIRROR - 1 ? MIRROR - 1 : y;
+      const i = (cy * MIRROR + cx) * 4;
+      return ((data[i]! * 256 + data[i + 1]!) / 65535) * (FIELD_CLAMP * 2) - FIELD_CLAMP;
+    };
+    const lower = texel(x0, y0) + (texel(x0 + 1, y0) - texel(x0, y0)) * fx;
+    const upper = texel(x0, y0 + 1) + (texel(x0 + 1, y0 + 1) - texel(x0, y0 + 1)) * fx;
+    return lower + (upper - lower) * fy;
+  };
+
+  /**
+   * World height of the surface over a world point, the way the shader sees it:
+   * the same funnel, waves and field the grid is displaced by. Handed to the
+   * spray rig, so a bubble bursts at the water above it wherever it has drifted
+   * to rather than at the one level sampled under the camera.
+   */
+  const waterLineNode = (world: V3): F => {
+    const p = vec2(world.x.sub(uCenter.x), world.z.sub(uCenter.z));
+    return uCenter.y
+      .add(funnel(p))
+      .add(waves(p))
+      .add(useSim ? sampleField(p).x : wakeRing(p));
+  };
 
   // ---- displacement --------------------------------------------------------
   // The mesh lies in the XZ plane (rotated -90° about X), so local x is world x
@@ -753,6 +889,7 @@ export function createPoolSurface(
       // clean and is then run forward to where its own inflow and its own wall
       // have left it.
       stepField(true);
+      mirror = null;
       priming = FIELD_PRIME;
     },
     heightAt: funnelHeight,
@@ -767,8 +904,20 @@ export function createPoolSurface(
       if (!pool) return 0;
       const dx = x - pool.center.x;
       const dz = z - pool.center.z;
-      return pool.waterY + funnelHeight(Math.hypot(dx, dz), e) + swellAt(dx, dz, elapsed);
+      return (
+        pool.waterY +
+        funnelHeight(Math.hypot(dx, dz), e) +
+        swellAt(dx, dz, elapsed) +
+        fieldHeight(dx, dz)
+      );
     },
+    chopAt(x, z, elapsed) {
+      if (!pool) return 0;
+      const dx = x - pool.center.x;
+      const dz = z - pool.center.z;
+      return swellAt(dx, dz, elapsed) + fieldHeight(dx, dz);
+    },
+    waterLineNode,
     setUnder(under) {
       uUnder.value = under ? 1 : 0;
     },
@@ -846,6 +995,7 @@ export function createPoolSurface(
         steps++;
       }
       if (acc > STEP * 3) acc = 0;
+      readMirror();
     },
     info: () => ({ ripples: options.ripples, reflect: options.reflect }),
     dispose() {
@@ -853,6 +1003,8 @@ export function createPoolSurface(
       geo.dispose();
       mat.dispose();
       fieldMat.dispose();
+      mirrorMat.dispose();
+      mirrorRT.dispose();
       fieldQuad.geometry.dispose();
       for (const t of rt) t.dispose();
       if (attached) attached.water.visible = true;
