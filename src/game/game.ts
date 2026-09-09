@@ -77,6 +77,20 @@ const UNDER_FOV = 6;
 /** Bubbles a second at the head of the plume torn under at a splash, and how long it lasts. */
 const PLUNGE_BUBBLES = 6000;
 const PLUME_TIME = 1.1;
+/**
+ * How hard the tilt of the water under a float pushes it, m/s² per unit slope.
+ * Gravity down a slope is the whole of it, so this is that with the rest of the
+ * rider's mass in the water taken off.
+ */
+const SLOPE_PUSH = 6;
+/** How fast that shove bleeds off once the water is level again, per second. */
+const SLOPE_DRAG = 1.5;
+/** Fastest the water alone can carry a rider, m/s. */
+const SLOPE_MAX = 2.4;
+/** How fast the seat squares itself onto the water it is riding, per second. */
+const TILT_LAMBDA = 5;
+/** Steepest water the horizon will follow, dh/dx: past this the frame is unreadable. */
+const TILT_MAX = 0.22;
 /** Share of the rider's speed the water they are paddling through is dragged at. */
 const PADDLE_PUSH = 0.55;
 /**
@@ -123,6 +137,7 @@ const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
 const _themeColor = new THREE.Color();
 const _flow = new THREE.Vector2();
+const _slope = new THREE.Vector2();
 const _under = new THREE.Vector3();
 const _bubbleAt = new THREE.Vector3();
 const _white = new THREE.Vector3(1, 1, 1);
@@ -259,6 +274,11 @@ export class Game {
   private submerged = 0;
   /** How far the water under the rider stands above its still level, m, followed. */
   private bob = 0;
+  /** Where the water alone is carrying the rider, m/s, and how the seat sits on it. */
+  private driftX = 0;
+  private driftZ = 0;
+  private tiltX = 0;
+  private tiltZ = 0;
   private wasUnder = false;
   /** Seconds of bubble plume left from going under. */
   private bubbleTime = 0;
@@ -813,6 +833,41 @@ export class Game {
     this.bob = expDamp(this.bob, chop, BOB_LAMBDA, dt);
   }
 
+  /**
+   * The water is not level, and a float on a slope slides down it: the bow wave
+   * of the rider's own splash shoves them out of it, the ring off the wall
+   * comes back and shoves them again, and the swell rocks them where nothing
+   * else is happening. The shove bleeds off, so it carries rather than steers.
+   */
+  private updateSurf(dt: number) {
+    const slope = this.poolSurface?.chopSlopeAt(this.px, this.pz, this.clock.elapsed, _slope);
+    if (slope) {
+      this.driftX -= slope.x * SLOPE_PUSH * dt;
+      this.driftZ -= slope.y * SLOPE_PUSH * dt;
+    }
+    const speed = Math.hypot(this.driftX, this.driftZ);
+    if (speed > SLOPE_MAX) {
+      this.driftX *= SLOPE_MAX / speed;
+      this.driftZ *= SLOPE_MAX / speed;
+    }
+    const keep = Math.max(0, 1 - SLOPE_DRAG * dt);
+    this.driftX *= keep;
+    this.driftZ *= keep;
+    this.px += this.driftX * dt;
+    this.pz += this.driftZ * dt;
+  }
+
+  /** The eased normal of the chop under the rider, as its two slope components. */
+  private updateTilt(dt: number) {
+    const slope = this.reducedMotion
+      ? null
+      : this.poolSurface?.chopSlopeAt(this.px, this.pz, this.clock.elapsed, _slope);
+    const x = slope ? THREE.MathUtils.clamp(slope.x, -TILT_MAX, TILT_MAX) : 0;
+    const z = slope ? THREE.MathUtils.clamp(slope.y, -TILT_MAX, TILT_MAX) : 0;
+    this.tiltX = expDamp(this.tiltX, x, TILT_LAMBDA, dt);
+    this.tiltZ = expDamp(this.tiltZ, z, TILT_LAMBDA, dt);
+  }
+
   private placeOnTube() {
     const c = Math.cos(this.bank);
     const s = Math.sin(this.bank);
@@ -1011,6 +1066,7 @@ export class Game {
       this.px += flow.x * DRIFT * dt;
       this.pz += flow.y * DRIFT * dt;
     }
+    this.updateSurf(dt);
     const near = this.nearestExit();
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
@@ -1125,6 +1181,8 @@ export class Game {
     this.plunge = 0;
     this.plungeVel = 0;
     this.bob = 0;
+    this.driftX = 0;
+    this.driftZ = 0;
     this.poolSurface?.attach(next);
     // The mouth was already dressed in this theme, so the tube the rider is now
     // in matches what they aimed at; the world around it catches up.
@@ -1178,7 +1236,12 @@ export class Game {
     this.current.tick(dt, this.clock.elapsed, _rider);
     this.updatePoolSurface(dt);
     this.updateSpray(dt);
-    this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);
+    this.audio.update(
+      this.speed,
+      this.mode,
+      this.mode === "whirl" ? this.whirlSpin : 0,
+      this.mode === "slide" ? 0 : (this.poolSurface?.foamAt(this.px, this.pz) ?? 0),
+    );
 
     this.hudTick += dt;
     if (this.hudTick > 0.08) {
@@ -1322,6 +1385,12 @@ export class Game {
           _camUp.set(-slope * _poolOut.x, 1, -slope * _poolOut.z).normalize();
         }
       }
+      // The swell and whatever the field is carrying tilt it too, followed at a
+      // float's rate: a crown arriving rolls the horizon before it lifts them.
+      this.updateTilt(dt);
+      _camUp.x -= this.tiltX;
+      _camUp.z -= this.tiltZ;
+      _camUp.normalize();
       _right.crossVectors(_fwd, _camUp);
       if (_right.lengthSq() < 1e-6) _right.set(1, 0, 0);
       else _right.normalize();

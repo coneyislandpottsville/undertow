@@ -111,3 +111,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 7.1, the post stack, MSAA on (Step 1) | tube | webgl | 332 (2.7) | 218 (4.5) |
 | 7.1, the post stack, MSAA on (Step 1) | pool | webgpu | 176 (0.2) | 105 (0.4) |
 | 7.1, the post stack, MSAA on (Step 1) | pool | webgl | 158 (4.9) | 103 (8.3) |
+| 7.2, what the copy owes the game (Step 2) | tube | webgpu | 361 (0.4) | 226 (0.6) |
+| 7.2, what the copy owes the game (Step 2) | tube | webgl | 327 (2.7) | 218 (4.3) |
+| 7.2, what the copy owes the game (Step 2) | pool | webgpu | 162 (0.4) | 106 (0.4) |
+| 7.2, what the copy owes the game (Step 2) | pool | webgl | 156 (5.0) | 102 (8.4) |
