@@ -67,10 +67,9 @@ export type RideSection = {
 
 type ExitVisual = {
   ring: THREE.Mesh;
-  light: THREE.PointLight;
   /** The destination's theme, which is what this mouth is dressed in. */
   theme: Theme;
-  phase: number;
+  index: number;
 };
 
 type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
@@ -98,30 +97,47 @@ function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
 
+/** How hard a mouth is glowing right now; the ring and its lamp share the beat. */
+export function mouthPulse(elapsed: number, index: number) {
+  return 0.5 + 0.5 * Math.sin(elapsed * 2.6 + index * 1.9);
+}
+
 /**
- * Write the film's `aDown` attribute: the direction water runs on this wall.
+ * Write the two per-ring attributes the film and the sheet read: `aDown`, the
+ * direction water runs on this wall, and the surface tangent.
  *
  * TubeGeometry lays out `(tubular + 1) x (radial + 1)` vertices, ring by ring,
- * sampling the curve by arc length, so one lookup per ring covers it.
+ * sampling the curve by arc length, so one lookup per ring covers both. The
+ * tangent is the ring's own frame rather than `computeTangents`: on a tube the
+ * uv derivative it fits is the curve tangent to within half a per cent, and
+ * fitting it costs more than building the geometry did.
  */
-function addApparentDown(
-  geo: THREE.BufferGeometry,
+function addRingAxes(
+  geo: THREE.TubeGeometry,
   tubular: number,
   radial: number,
   at: (u: number) => THREE.Vector3,
 ) {
   const perRing = radial + 1;
-  const data = new Float32Array((tubular + 1) * perRing * 3);
+  const count = (tubular + 1) * perRing;
+  const down = new Float32Array(count * 3);
+  const tangent = new Float32Array(count * 4);
   for (let i = 0; i <= tubular; i++) {
     const d = at(i / tubular);
+    const t = geo.tangents[i]!;
     for (let j = 0; j < perRing; j++) {
-      const k = (i * perRing + j) * 3;
-      data[k] = d.x;
-      data[k + 1] = d.y;
-      data[k + 2] = d.z;
+      const k = i * perRing + j;
+      down[k * 3] = d.x;
+      down[k * 3 + 1] = d.y;
+      down[k * 3 + 2] = d.z;
+      tangent[k * 4] = t.x;
+      tangent[k * 4 + 1] = t.y;
+      tangent[k * 4 + 2] = t.z;
+      tangent[k * 4 + 3] = 1;
     }
   }
-  geo.setAttribute("aDown", new THREE.BufferAttribute(data, 3));
+  geo.setAttribute("aDown", new THREE.BufferAttribute(down, 3));
+  geo.setAttribute("tangent", new THREE.BufferAttribute(tangent, 4));
 }
 
 /** The path's apparent-gravity direction at a distance along it. */
@@ -529,9 +545,8 @@ function addMouth(
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  geo.computeTangents();
   // A mouth is short and level: apparent gravity there is plain gravity.
-  addApparentDown(geo, 12, 10, () => DOWN);
+  addRingAxes(geo, 12, 10, () => DOWN);
   const mat = createMouthMaterial(theme, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -560,20 +575,15 @@ function addMouth(
   geometries.push(ringGeo);
   materials.push(ringMat);
 
-  const light = new THREE.PointLight(theme.accent, theme.exit.light, 18, 1.5);
-  light.position.copy(exit.position).addScaledVector(outward, -1.2);
-  light.position.y += 1.5;
-  group.add(light);
-
-  return { ring, light, theme, phase: exit.index * 1.9 };
+  return { ring, theme, index: exit.index };
 }
 
-function assembleMeshes(
+function* assembleMeshes(
   path: PathData,
   pool: PoolData,
   exits: Exit[],
   theme: Theme,
-): Pick<RideSection, "group" | "water" | "sheet" | "tick" | "dispose"> {
+): Generator<void, Pick<RideSection, "group" | "water" | "sheet" | "tick" | "dispose">, void> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -582,10 +592,7 @@ function assembleMeshes(
   const RADIAL = 16;
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, RADIAL, false);
-  // The film's normal map and anisotropy need per-vertex tangents; the
-  // derivative fallback is skewed by the tube's long, thin uv parametrisation.
-  tubeGeo.computeTangents();
-  addApparentDown(tubeGeo, tubular, RADIAL, (u) => sampleApparentDown(path, u * path.length));
+  addRingAxes(tubeGeo, tubular, RADIAL, (u) => sampleApparentDown(path, u * path.length));
   // TubeGeometry indexes ring by ring, so drawing a prefix of the index buffer
   // stops the tube where it enters the pool: the rest of the path is the
   // rider's flight over the water.
@@ -598,6 +605,8 @@ function assembleMeshes(
   group.add(tube);
   geometries.push(tubeGeo);
   materials.push(tubeMat);
+
+  yield;
 
   const sheetTubular = tubular * SHEET_ALONG;
   const sheetGeo = buildSheet(
@@ -619,8 +628,11 @@ function assembleMeshes(
   geometries.push(sheetGeo);
   materials.push(sheetMat);
 
+  yield;
+
   addRings(group, path, stop, theme, geometries, materials);
   addSleeve(group, path, stop, pool, theme, geometries, materials);
+  yield;
 
   // The basin runs from the rim down past the throat of the whirlpool funnel,
   // so the vortex never pokes through the floor and refraction has a closed
@@ -667,20 +679,9 @@ function assembleMeshes(
   materials.push(floorMat);
 
   for (const exit of exits) {
+    yield;
     exitVisuals.push(addMouth(group, exit, pool, path.radius, geometries, materials));
   }
-
-  const light = new THREE.PointLight(theme.accent, theme.light.pool, pool.radius * 3.2, 1.3);
-  light.position.copy(pool.center);
-  light.position.y = pool.waterY + 3.5;
-  group.add(light);
-
-  // A second, dimmer lamp under the surface, so refraction and absorption have
-  // a lit basin to read against instead of a black one.
-  const deep = new THREE.PointLight(theme.water, theme.light.deep, pool.radius * 2.6, 1.1);
-  deep.position.copy(pool.center);
-  deep.position.y = pool.waterY - BASIN_DEPTH * 0.55;
-  group.add(deep);
 
   return {
     group,
@@ -698,10 +699,8 @@ function assembleMeshes(
         rider.g,
       );
       for (const v of exitVisuals) {
-        const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity =
-          v.theme.exit.glow + pulse * v.theme.exit.pulse;
-        v.light.intensity = v.theme.exit.light + pulse * v.theme.exit.lightPulse;
+          v.theme.exit.glow + mouthPulse(elapsed, v.index) * v.theme.exit.pulse;
       }
       tickMaterials(dt);
     },
@@ -745,8 +744,7 @@ function buildSheet(
   downAt: (u: number) => THREE.Vector3,
 ) {
   const geo = new THREE.TubeGeometry(curve, tubular, radius, radial, false);
-  geo.computeTangents();
-  addApparentDown(geo, tubular, radial, downAt);
+  addRingAxes(geo, tubular, radial, downAt);
   const count = geo.attributes.position!.count;
   const perRing = radial + 1;
   const g = new Float32Array(count);
@@ -793,14 +791,14 @@ function layoutIsClear(path: PathData, pool: PoolData, avoid: PoolData[]): boole
   return true;
 }
 
-export function generateSection(
+export function* sectionSteps(
   seed: number,
   start: THREE.Vector3,
   startDir: THREE.Vector3,
   theme: Theme,
   first: boolean,
   avoid: PoolData[] = [],
-): RideSection {
+): Generator<void, RideSection, void> {
   let rng = new Rng(seed);
   let pool!: PoolData;
   let path!: PathData;
@@ -823,7 +821,9 @@ export function generateSection(
     }
     path = buildPath(cleaned, radius);
     if (layoutIsClear(path, pool, avoid)) break;
+    yield;
   }
+  yield;
   const entrance = lastDir(cleaned);
   const inward = new THREE.Vector3(
     pool.center.x - cleaned[cleaned.length - 1]!.x,
@@ -832,7 +832,6 @@ export function generateSection(
   );
   if (inward.lengthSq() < 1e-5) inward.copy(entrance);
   const exits = makeExits(pool, inward, rng, radius, seed, theme);
-  const meshes = assembleMeshes(path, pool, exits, theme);
   return {
     id: nextId++,
     seed,
@@ -840,8 +839,23 @@ export function generateSection(
     path,
     pool,
     exits,
-    ...meshes,
+    ...(yield* assembleMeshes(path, pool, exits, theme)),
   };
+}
+
+/** The same build, run to the end in one go: the first section, and the failsafe. */
+export function generateSection(
+  seed: number,
+  start: THREE.Vector3,
+  startDir: THREE.Vector3,
+  theme: Theme,
+  first: boolean,
+  avoid: PoolData[] = [],
+): RideSection {
+  const steps = sectionSteps(seed, start, startDir, theme, first, avoid);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
 }
 
 export function startPose(): { position: THREE.Vector3; dir: THREE.Vector3 } {

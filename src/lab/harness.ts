@@ -80,23 +80,33 @@ export type LabStats = {
   fps: number;
   frameMs: number;
   recentFps: number;
+  /** The frame the ride is judged by, not the mean it averages to. */
+  p99Ms: number;
+  worstMs: number;
+  /** Frames past the 20 ms a dropped one costs. */
+  spikes: number;
   gpuMs: number | null;
   drawCalls?: number;
   triangles?: number;
   extra?: Record<string, unknown>;
 };
 
-/** Frame counter since the last reset plus a short window for the overlay. */
+/** A frame slow enough to have dropped one, ms. */
+const SPIKE = 20;
+
+/** Every frame since the last reset, plus a short window for the overlay. */
 export class FrameMeter {
   private frames = 0;
   private seconds = 0;
   private gpuSum = 0;
   private gpuCount = 0;
   private recent: number[] = [];
+  private deltas: number[] = [];
 
   tick(dt: number) {
     this.frames++;
     this.seconds += dt;
+    this.deltas.push(dt * 1000);
     this.recent.push(dt);
     if (this.recent.length > 90) this.recent.shift();
   }
@@ -111,12 +121,15 @@ export class FrameMeter {
     this.seconds = 0;
     this.gpuSum = 0;
     this.gpuCount = 0;
+    this.deltas.length = 0;
   }
 
   stats(base: { backend: string; w: number; h: number } & LabInfo): LabStats {
     const fps = this.seconds > 0 ? this.frames / this.seconds : 0;
     const recentSeconds = this.recent.reduce((a, b) => a + b, 0);
     const recentFps = recentSeconds > 0 ? this.recent.length / recentSeconds : 0;
+    const sorted = [...this.deltas].sort((a, b) => a - b);
+    const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0;
     return {
       backend: base.backend,
       w: base.w,
@@ -126,6 +139,9 @@ export class FrameMeter {
       fps,
       frameMs: fps > 0 ? 1000 / fps : 0,
       recentFps,
+      p99Ms: at(0.99),
+      worstMs: sorted.length > 0 ? sorted[sorted.length - 1]! : 0,
+      spikes: this.deltas.reduce((n, ms) => n + (ms > SPIKE ? 1 : 0), 0),
       gpuMs: this.gpuCount > 0 ? this.gpuSum / this.gpuCount : null,
       drawCalls: base.drawCalls,
       triangles: base.triangles,

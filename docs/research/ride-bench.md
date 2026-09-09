@@ -6,11 +6,18 @@ are GPU milliseconds per frame from timestamp queries (`?gpu=1`). Machine and br
 `water-bench.md` (RTX 2060, i9-9900KF, Chrome 152, 2026-09-08). Regenerate a row with
 `node scripts/lab-bench.mjs --only ride --out <json> --md <md>`.
 
-Two phases, because the surfaces do not share a screen. **tube** holds W from the mouth and
+Three phases, because the surfaces do not share a screen. **tube** holds W from the mouth and
 samples the slide at speed: tube, film, rings, post. **pool** rides on through the splash and
 the whirlpool, lets go, and samples while paddling: the pool surface, the funnel, the mouths
 and their strips, post. The pool phase is the steady state, so it is the one the pool-side
 surfaces are measured in; the whirlpool itself is a seven-second transient at the same cost.
+**handoff** takes a mouth and rides the section beyond it, which is where a section is built
+and its shaders with it.
+
+From Build 9 a cell also carries the worst frame in the sample and how many of them passed
+20 ms, as `fps (gpu) worst/over`. Frames are uncapped here, so the ride runs three times its
+own clock and a build gets a third of the wall time it has when played; `screenshots/hitch.mjs`
+is the same loop at the refresh rate.
 
 | Build | Phase | Backend | 2560×1080 | 3440×1440 |
 | --- | --- | --- | --- | --- |
@@ -139,3 +146,9 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 8.3, the glow in three passes (Step 3) | tube | webgl | 387 (2.5) | 228 (4.2) |
 | 8.3, the glow in three passes (Step 3) | pool | webgpu | 194 (0.2) | 111 (0.7) |
 | 8.3, the glow in three passes (Step 3) | pool | webgl | 207 (5.6) | 201 (9.4) |
+| 9.1, the hitch (Step 1) | tube | webgpu | 345 (0.3) 125/15 | 207 (0.6) 218/9 |
+| 9.1, the hitch (Step 1) | tube | webgl | 350 (2.7) 431/47 | 219 (5.2) 735/16 |
+| 9.1, the hitch (Step 1) | pool | webgpu | 225 (0.2) 106/10 | 133 (0.4) 162/6 |
+| 9.1, the hitch (Step 1) | pool | webgl | 184 (5.3) 77/53 | 139 (9.0) 241/31 |
+| 9.1, the hitch (Step 1) | handoff | webgpu | 188 (0.3) 1610/12 | 112 (1.0) 1597/8 |
+| 9.1, the hitch (Step 1) | handoff | webgl | 352 (3.1) 272/19 | 213 (5.2) 517/28 |

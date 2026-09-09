@@ -43,6 +43,7 @@ import { BASIN_DEPTH, type PoolData, type RideSection } from "./generate";
 import { GRAVITY } from "./physics";
 import { colorTargets, emissiveTarget } from "./materials";
 import type { Theme } from "./theme";
+import { atPassDepth, reachable } from "./warm";
 
 type F = Node<"float">;
 type V2 = Node<"vec2">;
@@ -334,6 +335,13 @@ export type PoolSurface = {
    * `viewer` is the camera, which decides whether the pool draws at all.
    */
   update: (dt: number, elapsed: number, energy: number, viewer: THREE.Vector3) => void;
+  /**
+   * Build an object's shaders and pipelines for the reflection, which draws the
+   * world a second time into a target of its own with no MSAA and no MRT: a
+   * material warmed only for the frame's pass is built again the moment the
+   * pool it stands over comes into view.
+   */
+  warm: (object: THREE.Object3D, depthOf: (camera: THREE.Camera) => number) => Promise<void>;
   info: () => { ripples: string; reflect: number };
   dispose: () => void;
 };
@@ -653,6 +661,21 @@ export function createPoolSurface(
   fieldScene.add(fieldQuad);
   const fieldCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
+  /**
+   * Draw a full-screen quad into a target of our own. What the renderer was
+   * pointed at is put back: a section's shaders may be being built against the
+   * frame's own target and multiple render targets while this runs.
+   */
+  const intoTarget = (target: THREE.RenderTarget, quadScene: THREE.Scene) => {
+    const outer = renderer.getRenderTarget();
+    const outerMrt = renderer.getMRT();
+    renderer.setMRT(null);
+    renderer.setRenderTarget(target);
+    renderer.render(quadScene, fieldCamera);
+    renderer.setRenderTarget(outer);
+    renderer.setMRT(outerMrt);
+  };
+
   /** The field as everything downstream reads it: the half the last step wrote. */
   const uField = texture(rt[0].texture);
 
@@ -660,9 +683,7 @@ export function createPoolSurface(
   const stepField = (clear = false) => {
     uClear.value = clear ? 1 : 0;
     uPrev.value = rt[read].texture;
-    renderer.setRenderTarget(rt[read ^ 1]);
-    renderer.render(fieldScene, fieldCamera);
-    renderer.setRenderTarget(null);
+    intoTarget(rt[read ^ 1]!, fieldScene);
     read ^= 1;
     uField.value = rt[read].texture;
   };
@@ -710,9 +731,7 @@ export function createPoolSurface(
   const readMirror = () => {
     if (mirrorBusy) return;
     mirrorBusy = true;
-    renderer.setRenderTarget(mirrorRT);
-    renderer.render(mirrorScene, fieldCamera);
-    renderer.setRenderTarget(null);
+    intoTarget(mirrorRT, mirrorScene);
     void renderer
       .readRenderTargetPixelsAsync(mirrorRT, 0, 0, MIRROR, MIRROR)
       .then((data) => {
@@ -843,12 +862,30 @@ export function createPoolSurface(
 
   let reflection: V3 = waterTint.mul(0.6);
   let mirrorTarget: THREE.Object3D | null = null;
+  let warm: PoolSurface["warm"] = async () => {};
   if (options.reflect > 0) {
     const mirror = reflector({ resolutionScale: options.reflect, bounces: false });
     mirror.uvNode = mirror.uvNode!.add(distortion);
     mirrorTarget = mirror.target;
     reflection = mirror.rgb;
-    mirror.reflector.getVirtualCamera(camera).layers.disable(UNREFLECTED);
+    const virtual = mirror.reflector.getVirtualCamera(camera);
+    virtual.layers.disable(UNREFLECTED);
+    const reflectionTarget = mirror.reflector.getRenderTarget(virtual);
+    warm = async (object, depthOf) => {
+      const outer = renderer.getRenderTarget();
+      const outerMrt = renderer.getMRT();
+      renderer.setMRT(null);
+      renderer.setRenderTarget(reflectionTarget);
+      const done = atPassDepth(renderer, depthOf(virtual), () =>
+        reachable(object, () => renderer.compileAsync(object, virtual, scene)),
+      );
+      try {
+        await done;
+      } finally {
+        renderer.setRenderTarget(outer);
+        renderer.setMRT(outerMrt);
+      }
+    };
   }
 
   // The ride's key light and the rider's own lamp, as two specular lobes.
@@ -1134,6 +1171,7 @@ export function createPoolSurface(
       if (acc > STEP * 3) acc = 0;
       readMirror();
     },
+    warm,
     info: () => ({ ripples: options.ripples, reflect: options.reflect }),
     dispose() {
       mesh.removeFromParent();

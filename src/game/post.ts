@@ -26,6 +26,7 @@ import {
 } from "three/tsl";
 import type { Node } from "three/webgpu";
 import { EMISSIVE_HEADROOM, emissiveTarget } from "./materials";
+import { atPassDepth, reachable } from "./warm";
 
 type F = Node<"float">;
 type V2 = Node<"vec2">;
@@ -199,6 +200,12 @@ class GlowNode extends GlowBase {
 export type RidePost = {
   /** Draw the frame through the stack; replaces renderer.render(). */
   render: () => void;
+  /**
+   * Build an object's shaders and pipelines before it is drawn. A shader is
+   * cached against the targets, sample count and MRT of the pass it will be
+   * drawn in, so a warm-up aimed at the canvas would be thrown away.
+   */
+  warm: (object: THREE.Object3D, depthOf: (camera: THREE.Camera) => number) => Promise<void>;
   /** Zoom-blur strength as a share of the screen radius; 0 is off, 0.1 is the exit suck-in. */
   zoom: { value: number };
   /** The bloom's own uniforms, so a theme can set how hard the ride glows. */
@@ -231,7 +238,8 @@ export function createRidePost(
   // sample count has to be handed to it: a render target defaults to none, and
   // the canvas the antialiasing was asked for is never drawn to.
   const scenePass = pass(scene, camera, { samples: renderer.samples });
-  scenePass.setMRT(mrt({ output, emissive: emissiveTarget(vec4(emissive, 1)) }));
+  const sceneMrt = mrt({ output, emissive: emissiveTarget(vec4(emissive, 1)) });
+  scenePass.setMRT(sceneMrt);
   // Eight bits across the emissive channel, which is four samples of it the
   // scene pass no longer writes at half-float width. A blur five levels deep is
   // what reads it.
@@ -259,7 +267,34 @@ export function createRidePost(
   pipeline.outputNode = vec4(composed.rgb.mul(grade), composed.a);
 
   return {
-    render: () => pipeline.render(),
+    render: () => {
+      // The warm-up below leaves the pass's target and MRT on the renderer for
+      // as long as it runs, so the frame states what it draws into and puts
+      // back what it found.
+      const outer = renderer.getRenderTarget();
+      const outerMrt = renderer.getMRT();
+      renderer.setRenderTarget(null);
+      renderer.setMRT(null);
+      pipeline.render();
+      renderer.setRenderTarget(outer);
+      renderer.setMRT(outerMrt);
+    },
+    warm: async (object, depthOf) => {
+      renderer.setRenderTarget(scenePass.renderTarget);
+      renderer.setMRT(sceneMrt);
+      const done = atPassDepth(renderer, depthOf(camera), () =>
+        reachable(object, () => renderer.compileAsync(object, camera, scene)),
+      );
+      try {
+        // A material's shader is generated whenever the compile gets round to
+        // it, not when this is called, so the target and the MRT stay set until
+        // it is done.
+        await done;
+      } finally {
+        renderer.setRenderTarget(null);
+        renderer.setMRT(null);
+      }
+    },
     zoom,
     bloom: { strength: glow.strength, radius: glow.radius },
     under,

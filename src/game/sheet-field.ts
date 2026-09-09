@@ -258,9 +258,13 @@ export function createSheetField(renderer: THREE.WebGPURenderer, on: boolean): S
   const stepField = (clear = false) => {
     uClear.value = clear ? 1 : 0;
     uPrev.value = targets[read]!.texture;
+    const outer = renderer.getRenderTarget();
+    const outerMrt = renderer.getMRT();
+    renderer.setMRT(null);
     renderer.setRenderTarget(targets[read ^ 1]!);
     renderer.render(fieldScene, fieldCamera);
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(outer);
+    renderer.setMRT(outerMrt);
     read ^= 1;
     sheetField.value = targets[read]!.texture;
   };
