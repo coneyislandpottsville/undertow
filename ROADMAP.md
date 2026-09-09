@@ -34,13 +34,14 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 3. The camera stays smooth and readable through loops and whirlpools: no snaps,
    flips, or clipping.
 4. Desktop fullscreen and ultrawide first (16:9, 21:9, 32:9). Mobile adapts later.
-5. One seam for looks: `src/game/materials.ts` plus section assembly. Themes,
-   animated materials, and video textures swap in without touching movement or
-   generation.
+5. One seam for looks: `src/game/theme.ts` defines a theme, `materials.ts`
+   builds from it. A section reads it in `assembleMeshes`, the scene reads it
+   in `Game.applyTheme`. Themes, animated materials, and video textures swap in
+   without touching movement or generation.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 3, September 2026)
+## Where it stands (Build 4, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -78,14 +79,22 @@ pool the rider is heading into, carries the whirlpool funnel and the water
 surface; spray and mist run on the GPU; the film's wet band follows apparent g.
 Phase 4 is complete: all four surfaces from the research memo are in the ride.
 
+Done in Build 4 (phase 3, PRs #13 to #18): the tube as a canvas. `theme.ts`
+holds sixty-odd numbers per world and two readers consume them; the pool wall
+and basin became rock with caustics; six themes; exits dressed in the theme
+they open into; a cross-fade at every hand-off; and art on the tube interior.
+Phase 3 is complete.
+
 Open:
 
 - Progression undecided: depth counter only.
-- The pool wall is no longer black but is still bare: it carries the wall
-  streaks and a little emissive, and wants the theme pass to finish it. The
-  exit flash (ring bloom at point-blank range) may want taming.
-- Corkscrews at low speed slosh the rider; tune pendulum gain and damping by feel.
 - Mobile untested: touch keys exist, layout and performance do not.
+- The pool phase costs 10.5 ms of a 16.7 ms budget at 3440x1440. The basin's
+  rock and caustics are five noise evaluations a pixel, drawn again in the
+  reflection pass; that is where to look first if a later step needs the room.
+- Only the tube's interior is a screen. The pool wall could carry the same
+  panels, and nothing sets a theme by hand: `?theme=` and `?screen=` are the
+  only ways to pick one.
 
 ## Phases
 
@@ -110,15 +119,43 @@ Open:
 - Decide progression: depth counter only, or stakes such as near-misses,
   collectibles, or run length.
 
-### 3. The tube as a canvas (next)
+### 3. The tube as a canvas (done in Build 4)
 
-- Theme = palette + materials + lighting + fog + animated maps + video
-  textures, chosen per section.
-- Cross-fade themes at exits. Author four to six distinct themes.
-- The tube interior doubles as a screen for art and video.
-- Sequencing: switch the renderer (phase 4, step 1) before authoring themes, so
-  every theme is written once as node materials instead of GLSL first and TSL
-  later.
+Numbers per step in `docs/research/ride-bench.md`.
+
+- Step 1 (PR #13): the theme seam. `src/game/theme.ts` holds colours plus the
+  film, basin, exit, light, fog and bloom parameters every surface reads.
+  `Game.applyTheme(theme, t)` eases everything shared toward a theme, and the
+  pool surface and spray rigs took `setTheme` with the same shape, so pointing
+  them at another world is a uniform swap rather than a rebuild.
+- Step 2 (PR #14): the pool wall and basin. One rock treatment across the wall,
+  the rim, the tube sleeve and the floor: strata, erosion, grain, relief from
+  the height field's own screen-space gradient, a wet band and a scum line at
+  the water, ridged-noise caustics above and below it, and the pool's light
+  bouncing onto the rock. Three bugs with it: the tube stopped four metres
+  inside the pool and cut the surface (it now runs level through the wall and
+  stops 1.6 m in, with a rock sleeve for its outside); the exit ring blew out
+  at point-blank range (emissive now gives way with distance); absorption at
+  0.55 per metre made the pool flat paint.
+- Step 3 (PR #15): six themes — lagoon, abyss, kelp, ember, glacier, neon —
+  each a diff from the lagoon. A section's theme comes from its own seed and
+  never repeats the pool it opened out of, and because a child's seed is fixed
+  by its parent and the exit index, a pool dresses each mouth in the theme
+  beyond it. Three mouths are three worlds. `?theme=` pins a run to one.
+- Step 4 (PR #16): a section change cross-fades the whole theme over 1.2 s —
+  fog, background, four lights, bloom, and both shared rigs. The geometry does
+  not fade because it does not change: the mouth already carried the
+  destination. `?fade=` sets the length, `?fade=0` is the old snap.
+- Step 5 (PR #18): the tube interior is a screen. A theme names a pattern and
+  how the tube wears it — panel pitch and fill, copies around the tube,
+  brightness, glow, drift, tint — and the panel gives way where the film
+  sheets. `?screen=<url>` points every panel at an image, or at a VideoTexture
+  on a video extension.
+- PR #17 alongside: corkscrews at low speed no longer slosh the rider. The
+  generator could draw one whose turn circumference outran its length, so the
+  pitch is capped; and the seat pendulum was damped at a fixed rate against a
+  stiffness that varies tenfold with apparent gravity, so damping is now sized
+  against that stiffness.
 
 ### 4. Rendering upgrade (done in Build 3, path decided 2026-09-08)
 
@@ -145,15 +182,14 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
   mist (`src/game/spray.ts`), two storage buffers and one kernel so the WebGL 2
   backend runs it as transform feedback; the film's wet band on apparent g
   (`src/game/physics.ts`, `apparentDown` in `path.ts`).
-- Budget met: 128 fps in the pool phase and 198 in the tube at 3440×1440 with
-  MSAA 4× on WebGPU, 162 and 220 on the WebGL 2 tier, against 60. Per-step
-  numbers in `docs/research/ride-bench.md`, which measures both phases.
-  WebGL 2 tier: analytic ripples instead of the height field. Knobs:
-  `?ripples=`, `?reflect=`, `?refract=`, `?spray=`, `?post=0`.
-- Next: phase 3. Every surface reads its colours from `palette`, so a theme is
-  a palette plus maps plus lighting, authored once as node materials.
+- Budget met, and still met after Build 4: 95 fps in the pool phase and 220 in
+  the tube at 3440×1440 with MSAA 4× on WebGPU, 102 and 210 on the WebGL 2
+  tier, against 60. Per-step numbers in `docs/research/ride-bench.md`, which
+  measures both phases. WebGL 2 tier: analytic ripples instead of the height
+  field. Knobs: `?ripples=`, `?reflect=`, `?refract=`, `?spray=`, `?post=0`,
+  `?theme=`, `?screen=`, `?fade=`.
 
-### 5. Mobile
+### 5. Mobile (next)
 
 - Touch layout, orientation handling, performance tiers.
 
