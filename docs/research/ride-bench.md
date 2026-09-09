@@ -99,8 +99,15 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 6.4, the sheet answers the rider (Step 4) | tube | webgl | 328 (2.8) | 206 (4.6) |
 | 6.4, the sheet answers the rider (Step 4) | pool | webgpu | 154 (0.4) | 100 (0.6) |
 | 6.4, the sheet answers the rider (Step 4) | pool | webgl | 159 (5.2) | 103 (8.5) |
+| 6.5, the splash sounds like what it does (Step 5) | tube | webgpu | 339 (0.5) | 207 (0.8) |
+| 6.5, the splash sounds like what it does (Step 5) | tube | webgl | 329 (2.8) | 206 (4.7) |
+| 6.5, the splash sounds like what it does (Step 5) | pool | webgpu | 167 (0.4) | 98 (0.6) |
+| 6.5, the splash sounds like what it does (Step 5) | pool | webgl | 161 (5.3) | 103 (8.6) |
 
 Notes:
+
+- Build 6 Step 5 draws nothing: four filtered noise bursts on the schedule the splash already
+  runs. The row is here so the series has no gap in it.
 
 - Build 6 Step 4 is free: the levelling moves from the CPU at build time into the vertex stage,
   which is a handful of instructions on a grid the tube already draws, and it takes a per-vertex
