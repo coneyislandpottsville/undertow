@@ -40,6 +40,8 @@ const WHIRL_TIME = 7;
 const WHIRL_INNER = 3.2;
 /** Radial speed a full lean buys against the drain, m/s. */
 const WHIRL_LEAN = 3.2;
+/** Seconds the world takes to become the next section's theme; `?fade=` overrides. */
+const THEME_FADE = 1.2;
 
 function makeFrame() {
   return {
@@ -82,6 +84,10 @@ type Mode = RideMode;
 
 function expDamp(current: number, target: number, lambda: number, dt: number) {
   return current + (target - current) * (1 - Math.exp(-lambda * dt));
+}
+
+function smoothstep(x: number) {
+  return x * x * (3 - 2 * x);
 }
 
 function vFovFromHorizontal(hDeg: number, aspect: number) {
@@ -128,6 +134,10 @@ export class Game {
   private spray: Spray | null = null;
   /** Extra vertical FOV, degrees, punched on exit and decaying. */
   private fovPunch = 0;
+  /** The theme the world is becoming, and how long it has left to get there. */
+  private themeTarget: Theme | null = null;
+  private themeFade = 0;
+  private readonly themeFadeTime: number;
   private strokeTimer = 0;
   private whirlSpin = 0;
   /** Unit vector from the tube axis to the rider's seat on the wall. */
@@ -192,6 +202,8 @@ export class Game {
     const forceWebGL = query.get("backend") === "webgl";
     this.gpuTiming = query.has("gpu");
     this.postOn = query.get("post") !== "0";
+    const fade = Number(query.get("fade"));
+    this.themeFadeTime = Number.isFinite(fade) && query.has("fade") ? Math.max(0, fade) : THEME_FADE;
     this.renderer = new THREE.WebGPURenderer({
       canvas,
       antialias: true,
@@ -454,6 +466,26 @@ export class Game {
     }
     this.poolSurface?.setTheme(theme, t);
     this.spray?.setTheme(theme, t);
+  }
+
+  /**
+   * Advance a theme cross-fade. Each frame closes the share of the remaining
+   * gap that a smoothstep over the fade time asks for, so the ease is
+   * frame-rate independent and lands exactly on the new theme.
+   */
+  private fadeTheme(dt: number) {
+    const target = this.themeTarget;
+    if (!target) return;
+    const before = 1 - this.themeFade / this.themeFadeTime;
+    this.themeFade -= dt;
+    if (this.themeFade <= 0) {
+      this.applyTheme(target, 1);
+      this.themeTarget = null;
+      return;
+    }
+    const eased = smoothstep(1 - this.themeFade / this.themeFadeTime);
+    const from = smoothstep(before);
+    this.applyTheme(target, (eased - from) / (1 - from));
   }
 
   private tick() {
@@ -805,6 +837,10 @@ export class Game {
     this.drop += 1;
     this.whirlEnergy = 0;
     this.poolSurface?.attach(next);
+    // The mouth was already dressed in this theme, so the tube the rider is now
+    // in matches what they aimed at; the world around it catches up.
+    this.themeTarget = next.theme;
+    this.themeFade = this.themeFadeTime;
     this.trauma = Math.max(this.trauma, 0.28);
     this.fovPunch = 12;
     this.audio.whoosh();
@@ -812,7 +848,6 @@ export class Game {
     // not along the previous section's stale tangent.
     samplePath(next.path, this.dist, _frame);
     this.placeOnTube();
-    this.applyTheme(next.theme, 1);
     this.prune(prev);
     useHud.getState().patch({
       mode: "slide",
@@ -835,6 +870,7 @@ export class Game {
   }
 
   private present(dt: number) {
+    this.fadeTheme(dt);
     this.fovPunch = expDamp(this.fovPunch, 0, 4, dt);
     this.applyFov();
     if (this.post) {
