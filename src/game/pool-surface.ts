@@ -40,7 +40,7 @@ import {
 } from "three/tsl";
 import type { Node } from "three/webgpu";
 import type { PoolData, RideSection } from "./generate";
-import { colorTargets } from "./materials";
+import { colorTargets, emissiveTarget } from "./materials";
 import type { Theme } from "./theme";
 
 type F = Node<"float">;
@@ -809,7 +809,7 @@ export function createPoolSurface(
   // pool itself only lifts.
   mat.mrtNode = mrt({
     ...colorTargets(output),
-    emissive: vec4(shaded.rgb.mul(0.1).add(shaded.a.mul(0.35)), 1),
+    emissive: emissiveTarget(vec4(shaded.rgb.mul(0.1).add(shaded.a.mul(0.35)), 1)),
   });
 
   const geo = new THREE.PlaneGeometry(PLANE_HALF * 2, PLANE_HALF * 2, GRID - 1, GRID - 1);

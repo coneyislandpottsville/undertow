@@ -71,6 +71,18 @@ export function colorTargets(color: V4): Record<string, V4> {
   return { "": color, output: color };
 }
 
+/**
+ * How far past white the emissive channel has to reach. A ring at the top of
+ * its pulse is the brightest thing the ride writes into it, and the channel is
+ * a byte target, so everything that writes it divides by this and the bloom
+ * multiplies it back.
+ */
+export const EMISSIVE_HEADROOM = 3;
+
+export function emissiveTarget(glow: V4): V4 {
+  return glow.div(EMISSIVE_HEADROOM);
+}
+
 /** Share of rider speed the film flows at along the wall; the rest of the speed streams past the rider. */
 const FILM_FLOW = 0.15;
 /** Idle trickle, m/s, so a held rider or an exit mouth never shows a frozen film. */
@@ -401,7 +413,9 @@ export function createSheetMaterial(
   mat.alphaTest = 0.5;
   mat.mrtNode = mrt({
     ...colorTargets(output),
-    emissive: vec4(glow.add(color(theme.ring).mul(foam.mul(0.6).add(glint.mul(0.5)))), 1),
+    emissive: emissiveTarget(
+      vec4(glow.add(color(theme.ring).mul(foam.mul(0.6).add(glint.mul(0.5)))), 1),
+    ),
   });
   flows.set(mat, uFlow);
   ploughs.set(mat, uPlough);
@@ -448,7 +462,7 @@ export function createWaterMaterial(theme: Theme): THREE.MeshStandardNodeMateria
   // The emissive lifts the pool's colour; only a fifth of it should bloom, or
   // the whole pool washes out around the exits. `output` is named alongside it
   // so the fragment struct is never empty when the renderer draws without MRT.
-  mat.mrtNode = mrt({ ...colorTargets(output), emissive: emissive.mul(0.2) });
+  mat.mrtNode = mrt({ ...colorTargets(output), emissive: emissiveTarget(vec4(emissive.mul(0.2), 1)) });
   return mat;
 }
 

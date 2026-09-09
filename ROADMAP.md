@@ -41,7 +41,7 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 6, September 2026)
+## Where it stands (Build 7, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -100,16 +100,18 @@ in the tube answers the rider rather than the speed their section was drawn for;
 the splash is four sounds on the schedule the water already runs; and each theme
 has its own sheet and its own body of water.
 
+Done in Build 7 (phase 7): the water, continued again. The ride is
+multisampled: it never was, because the post stack draws the scene into a
+render target of its own and `antialias: true` only reaches the canvas, and the
+stack pays for the four samples out of its own budget.
+
 Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 10.2 ms of a 16.7 ms budget at 3440x1440 and the tube
-  phase 4.9 ms. Where the rest of it goes, measured by taking one thing out at a
-  time: the post stack 7.2 ms, the pool surface and its mirror 5.4, the basin
-  4.1, the spray 0.8 — overlapping, because they are mostly the same pixels.
-  The post stack is the one nothing has been taken out of yet: two half-float
-  targets at four samples, a bloom chain, and a full-resolution composite.
+- The pool phase costs 9.5 ms of a 16.7 ms budget at 3440x1440 and the tube
+  phase 4.4 ms, both with four samples. What is left in the post stack is the
+  bloom chain, which is twelve passes at a third of the frame.
 - The field's copy is 128² over the pool, so the CPU sees the water at 30 cm and
   a frame or two late. Enough for a water line and a float; not enough to read a
   droplet's landing or to put anything small on the surface.
@@ -329,11 +331,29 @@ MSAA on.
   is not — a bright world needs less of that than a dark one or the water reads
   as a slab. Glacier's meltwater came out milk at the density the others carry.
 
-### 7. Mobile (parked)
+### 7. The water, continued (Build 7)
+
+Numbers per step in `docs/research/ride-bench.md`. Hold 60 fps at 3440×1440 with
+MSAA on.
+
+- Step 1 (PR #33): the post stack, and the antialiasing it was not doing. The
+  renderer's sample count reaches the canvas, and the post stack never draws
+  there: its pass owns a render target, which defaults to no samples, so every
+  frame from Build 3 on was drawn without MSAA. The pass takes the renderer's
+  count now and the stack pays for it. The emissive channel is a byte target —
+  a ring at the top of its pulse is the brightest thing written into it, so
+  everything that writes it divides by that headroom and the bloom multiplies it
+  back. The zoom blur spreads over the picture alone and the halo is added after
+  the taps, which takes a full-resolution target and a pass off the stack:
+  blurring their sum meant writing the sum out first, to smear something already
+  soft. Pool 99 to 105 fps at 3440×1440 on WebGPU, tube 207 to 226, with four
+  samples where there were none.
+
+### 8. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
 
-### 8. Framing
+### 9. Framing
 
 - Attract mode, seed sharing, share card.
 
