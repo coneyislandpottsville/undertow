@@ -167,6 +167,10 @@ const FOAM_INFLOW = 0.5;
 const INFLOW_CHURN = 0.18;
 const INFLOW_GRIP = 0.05;
 const FOAM_LAP = 0.7;
+/** Slope a wave breaks over, and how hard the crest whitens once it does. */
+const BREAK_LOW = 0.28;
+const BREAK_HIGH = 0.55;
+const FOAM_BREAK = 2.2;
 const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
 /** Never quite paints the water out: aerated water is still water. */
@@ -520,12 +524,11 @@ export function createPoolSurface(
       const q = src.add(offset.mul(PLANE_HALF * 2));
       return mix(here.x, fieldAt(srcUV.add(offset)).x, step(length(q), uRadius));
     };
-    const lap = neighbour(vec2(-TEXEL, 0))
-      .add(neighbour(vec2(TEXEL, 0)))
-      .add(neighbour(vec2(0, -TEXEL)))
-      .add(neighbour(vec2(0, TEXEL)))
-      .mul(0.25)
-      .sub(here.x);
+    const west = neighbour(vec2(-TEXEL, 0));
+    const east = neighbour(vec2(TEXEL, 0));
+    const south = neighbour(vec2(0, -TEXEL));
+    const north = neighbour(vec2(0, TEXEL));
+    const lap = west.add(east).add(south).add(north).mul(0.25).sub(here.x);
     const inside = step(r, uRadius);
     // A dome for a drop; for a body entering the water, the crater it displaces
     // with the crown standing around it, which peaks a radius and a bit out.
@@ -566,6 +569,13 @@ export function createPoolSurface(
     // The field only moves where something has hit it, so its own velocity is a
     // reading of how churned the water is.
     const churn = abs(vel).mul(FOAM_CHURN);
+    // A wave steep enough to fall over does. The four neighbours the curvature
+    // is already made of are the slope as well, and a crest carrying that slope
+    // is the top of a wave whose face has run out of water to stand on.
+    const steep = length(vec2(east.sub(west), north.sub(south))).div(CELL * 2);
+    const breaking = smoothstep(BREAK_LOW, BREAK_HIGH, steep)
+      .mul(smoothstep(0, 0.1, here.x))
+      .mul(FOAM_BREAK);
     const lip = smoothstep(0.16, 0.02, abs(rho.sub(lipRho))).mul(uEnergy).mul(FOAM_LIP);
     const wake = exp(dWake.mul(dWake).div(1.6).negate()).mul(uWake.w).mul(FOAM_WAKE);
     const inflow = landing.mul(FOAM_INFLOW);
@@ -576,7 +586,7 @@ export function createPoolSurface(
     // Aeration at the impact itself, so a splash whitens before its own ripples
     // have had time to churn the water.
     const struck = abs(imp).mul(FOAM_SPLASH);
-    const born = churn.add(lip).add(wake).add(inflow).add(lapping).add(struck);
+    const born = churn.add(breaking).add(lip).add(wake).add(inflow).add(lapping).add(struck);
     const foam = carried.mul(FOAM_DECAY).add(born.mul(STEP)).clamp(0, 1).mul(inside);
 
     // A node material's colour output is clamped to zero — three does it to

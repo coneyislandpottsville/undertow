@@ -119,3 +119,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 7.3, the half of the water below the line (Step 3) | tube | webgl | 329 (2.7) | 217 (4.4) |
 | 7.3, the half of the water below the line (Step 3) | pool | webgpu | 174 (0.3) | 106 (0.4) |
 | 7.3, the half of the water below the line (Step 3) | pool | webgl | 153 (5.1) | 99 (8.5) |
+| 7.4, the wave that falls over (Step 4) | tube | webgpu | 358 (0.4) | 226 (0.6) |
+| 7.4, the wave that falls over (Step 4) | tube | webgl | 330 (2.7) | 218 (4.3) |
+| 7.4, the wave that falls over (Step 4) | pool | webgpu | 178 (0.3) | 105 (0.4) |
+| 7.4, the wave that falls over (Step 4) | pool | webgl | 146 (5.4) | 100 (8.6) |
