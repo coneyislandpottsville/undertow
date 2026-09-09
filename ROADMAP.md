@@ -48,11 +48,11 @@ materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` force
 it), zustand HUD, Tailwind v4. No auth, no database.
 Repository: github.com/coneyislandpottsville/undertow, PRs squash-merged to main.
 
-The whole loop runs on both tiers at over three times the frame budget, and on
-WebGPU at the refresh rate it holds it: two frames of a fifty-second run pass
-20 ms. The tube is generated, themed and dressed; the pool is a body of water
-the rider floats on, goes under, splashes into and reads through; the post
-stack, the spray and the audio all answer what the water is doing.
+The whole loop runs on both tiers at over twice the frame budget, and at the
+refresh rate it holds it except for one stall per drop. The tube is generated,
+themed and dressed; both the flume and the pool run a field of water the rider
+is moved by, floats on, goes under, splashes into, reads through and hears; the
+post stack, the spray and the audio all answer what the water is doing.
 
 Knobs: `?seed=`, `?theme=`, `?screen=`, `?fade=`, `?backend=`, `?post=0`,
 `?reflect=`, `?refract=`, `?foam=`, `?spray=`, `?spraysize=`, `?gpu=1`.
@@ -68,17 +68,17 @@ Open:
   the pool coming into view down each flume costs a stall of about two seconds.
   The warm-up lands on WebGPU and does not there, and why is not yet known.
 - A material bakes its theme, its flume's length and its radius in as constants,
-  so no two sections share a shader and each costs a score of them. Sampled
-  maps in place of procedural noise, and those three as uniforms, would make
-  the set finite.
+  so no two sections share a shader and each costs a score of them. Those three
+  as uniforms would make the set finite; the sampled maps that had to come
+  first are in.
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
-- Played at the refresh rate a fifty-second run drops a dozen frames past 20 ms,
-  in one stall of 250 to 340 ms per drop, mid-flume at full speed. The main
-  thread is not blocked through them, so it is the GPU or the driver: a pipeline
-  still being built as it is drawn. Main measures the same, so the warm-up is
-  landing on less than it looks like it is.
+- Played at the refresh rate a fifty-second run drops fifteen to eighteen frames
+  past 20 ms at either resolution, and they are three long tasks: about 250 ms
+  and 205 ms, one nine seconds into each flume at full speed, and 70 ms at the
+  splash after. The build a section is spread over frames still has one lump in
+  it. Build 9.1 left this standing rather than removing it.
 - The pool's field is 256 texels across 38 m, so the pool carries nothing shorter
   than about 60 cm; below that the surface's own detail is a shading trick, not
   water that moves. Its copy for the CPU is 128 texels, so nothing the game reads
