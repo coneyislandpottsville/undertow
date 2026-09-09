@@ -24,6 +24,7 @@ import {
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { Node } from "three/webgpu";
+import { EMISSIVE_HEADROOM, emissiveTarget } from "./materials";
 
 type F = Node<"float">;
 type V2 = Node<"vec2">;
@@ -88,10 +89,17 @@ export function createRidePost(
   camera: THREE.Camera,
 ): RidePost {
   const pipeline = new THREE.RenderPipeline(renderer);
-  const scenePass = pass(scene, camera);
-  scenePass.setMRT(mrt({ output, emissive }));
+  // The pass owns the frame the ride is drawn into, so the renderer's own
+  // sample count has to be handed to it: a render target defaults to none, and
+  // the canvas the antialiasing was asked for is never drawn to.
+  const scenePass = pass(scene, camera, { samples: renderer.samples });
+  scenePass.setMRT(mrt({ output, emissive: emissiveTarget(vec4(emissive, 1)) }));
+  // Eight bits across the emissive channel, which is four samples of it the
+  // scene pass no longer writes at half-float width. A blur five levels deep is
+  // what reads it.
+  scenePass.getTexture("emissive").type = THREE.UnsignedByteType;
   const colorNode = scenePass.getTextureNode("output");
-  const glow = bloom(scenePass.getTextureNode("emissive"), 0.6, 0.4, 0);
+  const glow = bloom(scenePass.getTextureNode("emissive").mul(EMISSIVE_HEADROOM), 0.6, 0.4, 0);
   // The bloom is a wide, soft halo, so it is built from a third of the frame
   // rather than a half: five levels of separable blur are the stack's largest
   // single cost and nothing in the picture resolves what they give up.
@@ -106,7 +114,13 @@ export function createRidePost(
     sin(uv().y.mul(26).add(time.mul(1.9))),
     cos(uv().x.mul(21).sub(time.mul(1.5))),
   ).mul(under.mul(0.0045));
-  const composed = zoomBlur(colorNode.add(glow), zoom, warp);
+  // The taps spread over the picture alone and the halo is added after them, so
+  // the two only meet in the frame that goes to the screen. Blurring their sum
+  // meant writing that sum to a full-resolution target first, which is a read
+  // and a write of the whole frame to smear something already soft.
+  (glow as unknown as { getTextureNode(): THREE.TextureNode }).getTextureNode().uvNode =
+    uv().add(warp);
+  const composed = zoomBlur(colorNode, zoom, warp).add(glow);
   const closeIn = mix(float(1), smoothstep(0.95, 0.2, length(uv().sub(0.5))).mul(0.8).add(0.2), under);
   const grade = mix(vec3(1), underColor, under.mul(0.55)).mul(closeIn);
   pipeline.outputNode = vec4(composed.rgb.mul(grade), composed.a);
