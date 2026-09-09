@@ -19,8 +19,14 @@ const SIT = 1.05;
 const HEAD = 0.42;
 /** A/D push along the wall, m/s²: about 38° of bank at rest against gravity. */
 const LEAN_ACCEL = 16;
-/** Seat pendulum damping, 1/s: just under critical, so a lean settles with a hint of sway. */
-const BANK_DAMP = 8;
+/** Seat pendulum damping ratio: just under critical, so a lean settles with a hint of sway. */
+const BANK_ZETA = 0.9;
+/**
+ * Floor on the apparent acceleration the damping is sized against, m/s².
+ * Weightless, the seat is a free bead and there is nothing to damp against;
+ * without a floor it would be left undamped and swing.
+ */
+const BANK_PRESS_FLOOR = 8;
 /** Stiffens the seat pendulum beyond a free bead, so leans answer in a few tenths of a second. */
 const PENDULUM_GAIN = 1.7;
 /** How far the rider floats toward the axis at full airtime, m. */
@@ -590,7 +596,14 @@ export class Game {
     const contact = THREE.MathUtils.clamp(1 + into / 16, 0.25, 1);
     const along = _accel.dot(_that) * contact + steer * LEAN_ACCEL;
     const seat = this.current.path.radius - SIT;
-    this.bankVel += ((along * PENDULUM_GAIN) / seat - BANK_DAMP * this.bankVel) * dt;
+    // The seat is a pendulum whose stiffness is whatever is pressing the rider
+    // into the wall: a tenth of a g in airtime, three g through a fast turn.
+    // Damping is sized against that stiffness rather than fixed, so a lean
+    // settles the same way at every speed instead of ringing in a hard turn and
+    // going slack through a slow corkscrew.
+    const stiffness = (PENDULUM_GAIN * Math.max(Math.abs(into), BANK_PRESS_FLOOR)) / seat;
+    const damp = 2 * BANK_ZETA * Math.sqrt(stiffness);
+    this.bankVel += ((along * PENDULUM_GAIN) / seat - damp * this.bankVel) * dt;
     this.bank += this.bankVel * dt;
     if (this.bank > Math.PI) this.bank -= Math.PI * 2;
     else if (this.bank < -Math.PI) this.bank += Math.PI * 2;

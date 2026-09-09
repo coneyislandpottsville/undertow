@@ -218,14 +218,25 @@ function addS(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Corkscrew around a gently descending axis; the radius eases in and out so entry and exit stay smooth. */
+/**
+ * Corkscrew around a gently descending axis; the radius eases in and out so
+ * entry and exit stay smooth.
+ *
+ * The pitch is capped: a corkscrew whose turn circumference outruns the length
+ * it advances is a drum, and a rider who slows down in one keeps their seat but
+ * has the whole view swung around them once every few metres. Stretching the
+ * feature until it advances at least a share of its own circumference per turn
+ * keeps it a roll.
+ */
+const HELIX_PITCH = 0.85;
+
 function addHelix(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
   const axis = withPitch(dir, -rng.range(0.1, 0.22));
-  const length = rng.range(38, 58);
-  const r = rng.range(5, 8.5);
-  const turns = rng.range(1, 1.75);
+  const r = rng.range(4.5, 7.5);
+  const turns = rng.range(1, 1.5);
+  const length = Math.max(rng.range(42, 62), (2 * Math.PI * r * turns) / HELIX_PITCH);
   const steps = 24;
   const right = orthonormalRight(axis);
   const nrm = new THREE.Vector3().crossVectors(right, axis).normalize();
