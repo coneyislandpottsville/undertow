@@ -39,7 +39,8 @@ import {
   viewportSharedTexture,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import type { PoolData, RideSection } from "./generate";
+import { BASIN_DEPTH, type PoolData, type RideSection } from "./generate";
+import { GRAVITY } from "./physics";
 import { colorTargets, emissiveTarget } from "./materials";
 import type { Theme } from "./theme";
 
@@ -67,18 +68,6 @@ const SIGMA_MAX = 0.54;
 /** Metres the field's height may reach either side of the still water line. */
 const FIELD_CLAMP = 1.2;
 /**
- * What a metre of impulse amplitude is worth as a metre of water.
- *
- * An impulse is a one-step kick to the velocity, and the field integrates that
- * for the quarter period of the feature it made — about ten steps at a couple
- * of metres across — before its own curvature turns it round. Written raw, a
- * splash asked for twenty metres of displacement, drove the height into its
- * clamp, and stuck there: a clamped patch is level with its neighbours, so
- * nothing restores it and it spreads for as long as the damping takes to bleed
- * the velocity off. Amplitudes are in metres of water, and this is the rate.
- */
-const IMPULSE_GAIN = 0.08;
-/**
  * Texels per side of the copy of the field the CPU reads back.
  *
  * Forty-centimetre cells over the pool, which is finer than the crown of a
@@ -86,19 +75,36 @@ const IMPULSE_GAIN = 0.08;
  * 256 bytes or the WebGPU copy pads it.
  */
 const MIRROR = 128;
-/** Field step: wave speed and per-step damping at 60 Hz. */
-const WAVE_C = 0.4;
-const WAVE_DAMP = 0.992;
+const STEP = 1 / 60;
+/** One texel of the field, m. */
+const CELL = (PLANE_HALF * 2) / FIELD;
 /**
- * Per-step pull back to the still line.
+ * How fast the pool's waves run, m/s: shallow water over the basin, or as fast
+ * as the grid can carry, whichever is less. An explicit step needs the squared
+ * Courant number under a half, and the basin is deep enough that the grid is
+ * always what binds.
+ */
+const WAVE_SPEED = Math.min(Math.sqrt(GRAVITY * BASIN_DEPTH), (CELL / STEP) * Math.sqrt(0.375));
+/**
+ * The coefficient on the curvature term for that speed. The term is the mean of
+ * the four neighbours less the middle, which is a quarter of the Laplacian, so
+ * the squared Courant number is a quarter of this.
+ */
+const WAVE_C = (4 * (WAVE_SPEED * STEP) ** 2) / CELL ** 2;
+/**
+ * Seconds a wave takes to fade to a third of itself — long enough that a ring
+ * still reads coming back off the wall — and seconds the still line takes to
+ * reclaim water left standing at the wrong level.
  *
  * Damping the velocity does nothing to water that is standing still at the
  * wrong level, and a lift with no curvature in it is invisible to the
- * neighbours: whatever volume a splash or the flume leaves behind stays. This
- * is the pool having somewhere for it to go.
+ * neighbours: whatever volume a splash or the flume leaves behind stays. The
+ * second of these is the pool having somewhere for it to go.
  */
-const LEVEL_DAMP = 0.997;
-const STEP = 1 / 60;
+const WAVE_LIFE = 3;
+const LEVEL_LIFE = 6;
+const WAVE_DAMP = Math.exp(-STEP / WAVE_LIFE);
+const LEVEL_DAMP = Math.exp(-STEP / LEVEL_LIFE);
 /** How deep the floatie presses the surface, m. */
 const DISH = 0.1;
 /**
@@ -169,12 +175,18 @@ const INFLOW_GRIP = 0.05;
 /** Metres of pool the flume's own surge is worth where it lands. */
 const INFLOW_SURGE = 0.5;
 const FOAM_LAP = 0.7;
-/** Slope a wave breaks over, and how hard the crest whitens once it does. */
-const BREAK_LOW = 0.28;
-const BREAK_HIGH = 0.55;
+/**
+ * Slope a wave breaks over, and how hard the crest whitens once it does.
+ *
+ * A wave as steep as water can stand carries a hundred and twenty degrees of
+ * crest, which is a surface running away at thirty either side; it starts to
+ * spill a little short of that.
+ */
+const BREAK_LOW = 0.35;
+const BREAK_HIGH = Math.tan(Math.PI / 6);
 const FOAM_BREAK = 2.2;
 const FOAM_SPLASH = 1200;
-const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
+const FOAM_DECAY = Math.exp(-STEP / FOAM_LIFE);
 /** Never quite paints the water out: aerated water is still water. */
 const FOAM_MAX = 0.85;
 /**
@@ -516,7 +528,6 @@ export function createPoolSurface(
   /** Where a plane point sits in the field, and the size of one of its texels. */
   const fieldUV = (p: V2): V2 => p.div(PLANE_HALF * 2).add(0.5);
   const TEXEL = 1 / FIELD;
-  const CELL = (PLANE_HALF * 2) / FIELD;
   const fieldAt = (uvNode: V2) => uPrev.sample(uvNode);
 
   {
@@ -536,6 +547,14 @@ export function createPoolSurface(
     // between two different parcels of water is not a curvature, and in the
     // vortex, where the two are furthest apart, it feeds the field instead of
     // spreading it.
+    //
+    // Nothing is masked to the pool. The field is sampled where the flow brought
+    // it from, which near the rim is between texels: with the water outside cut
+    // to nothing, every one of those samples came back lower than the water
+    // actually was and the curvature answered by lifting it, so the wall poured
+    // water in and the pool stood most of a metre proud of its own line. The
+    // cells past the rim are ghosts of the ones inside instead, and the stencil
+    // above is what keeps the wall a wall.
     const neighbour = (offset: V2): F => {
       const q = src.add(offset.mul(PLANE_HALF * 2));
       return mix(here.x, fieldAt(srcUV.add(offset)).x, step(length(q), uRadius));
@@ -545,14 +564,21 @@ export function createPoolSurface(
     const south = neighbour(vec2(0, -TEXEL));
     const north = neighbour(vec2(0, TEXEL));
     const lap = west.add(east).add(south).add(north).mul(0.25).sub(here.x);
-    const inside = step(r, uRadius);
     // A dome for a drop; for a body entering the water, the crater it displaces
     // with the crown standing around it, which peaks a radius and a bit out.
     const dImp = length(p.sub(uImpulse.xy));
     const q = dImp.div(uImpulse.z);
     const dome = exp(q.mul(q).negate());
     const crown = q.mul(q).mul(2).sub(1).mul(dome).mul(2.24);
-    const imp = mix(dome, crown, uImpulseShape).mul(uImpulse.w).mul(IMPULSE_GAIN);
+    // An impulse is one step of velocity, and the field integrates it until the
+    // feature's own curvature turns it round — a quarter of its period, which is
+    // its radius over the wave speed. A kick that is to build a metre is
+    // therefore a metre spread over those steps, so a droplet and a body landing
+    // both arrive at the amplitude they asked for.
+    const imp = mix(dome, crown, uImpulseShape)
+      .mul(uImpulse.w)
+      .mul(WAVE_SPEED * STEP)
+      .div(uImpulse.z);
     // The floatie presses a shallow dish into the surface; as it moves the dish
     // springs back and leaves a wake behind it. The water it is sitting in is
     // damped as well as sprung, or the dish drives itself to the clamp and the
@@ -570,16 +596,21 @@ export function createPoolSurface(
     const raw = here.x.mul(LEVEL_DAMP).add(moved);
     const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
     // Whatever the limit took off the height comes off the velocity with it,
-    // the way hitting a wall spends the speed that hit it. Kept, it would go on
-    // pushing against a limit that cannot push back.
-    const vel = moved.sub(raw.sub(limited));
+    // the way hitting a wall spends the speed that hit it — and a cell sitting
+    // on the limit may not go on pushing into it. Left able to, it kept exactly
+    // the velocity the pull to the still line was taking off, so anything that
+    // touched the limit stayed there and the pool filled up.
+    const raised = step(FIELD_CLAMP, raw);
+    const lowered = step(FIELD_CLAMP, raw.negate());
+    const spent = moved.sub(raw.sub(limited));
+    const vel = mix(mix(spent, spent.min(0), raised), spent.max(0), lowered);
     // Water falling in off the flume: the patch it lands in is held at what the
     // fall is doing to it, and the rings leave because its neighbours take it up.
     const stir = sin(uTime.mul(5.1))
       .add(sin(uTime.mul(3.17).add(2)))
       .mul(0.5 * INFLOW_CHURN)
       .add(delivered);
-    const height = mix(limited, stir, landing.mul(INFLOW_GRIP)).mul(inside);
+    const height = mix(limited, stir, landing.mul(INFLOW_GRIP));
 
     // Foam is carried the same way, so the spiral arms of a whirlpool are a
     // ring of foam at the lip being drawn out rather than a pattern painted in
@@ -607,7 +638,7 @@ export function createPoolSurface(
     // have had time to churn the water.
     const struck = abs(imp).mul(FOAM_SPLASH);
     const born = churn.add(breaking).add(lip).add(wake).add(inflow).add(lapping).add(struck);
-    const foam = carried.mul(FOAM_DECAY).add(born.mul(STEP)).clamp(0, 1).mul(inside);
+    const foam = carried.mul(FOAM_DECAY).add(born.mul(STEP)).clamp(0, 1);
 
     // A node material's colour output is clamped to zero — three does it to
     // keep render targets unsigned — and the field is signed: every trough,

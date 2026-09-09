@@ -77,11 +77,8 @@ type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
 
 let nextId = 1;
 
-/**
- * Metres from the water line to the basin floor. Deep enough to hold the
- * whirlpool funnel's throat (see FUNNEL_DEPTH in pool-surface.ts).
- */
-const BASIN_DEPTH = 5.5;
+/** Metres from the water line to the basin floor: deep enough for the funnel's throat. */
+export const BASIN_DEPTH = 5.5;
 /** Metres from the water line to the rim of the wall, clear of the mouths. */
 const POOL_RIM = 7;
 /**

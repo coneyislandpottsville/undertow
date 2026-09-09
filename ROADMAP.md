@@ -61,12 +61,14 @@ Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 9.3 ms of a 16.7 ms budget at 3440×1440 and the tube
-  phase 4.1, both with four samples. What is left in the post stack is the bloom
+- The pool phase costs 9.2 ms of a 16.7 ms budget at 3440×1440 and the tube
+  phase 4.3, both with four samples. What is left in the post stack is the bloom
   chain, twelve passes at a third of the frame.
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
+- The pool's swell is analytic, so it cannot break, carry foam or be splashed
+  through; the field under it is quiet between events.
 - The pool's field is 256 texels across 38 m, so the pool carries nothing shorter than
   about 60 cm; below that the surface's own detail is a shading trick, not water
   that moves. Its copy for the CPU is 128 texels of height and foam with one
@@ -155,6 +157,24 @@ Hold 60 fps at 3440×1440 with MSAA on.
   held at what feeds them: the header tank at the top, and the pool at the
   bottom — whose inflow reads the flume's outfall back, so the water the rider
   pushes ahead of them is already piling under the mouth as they come out of it.
+
+- Step 2 (PR #39): the field's numbers. The pool's curvature term is the mean of
+  its four neighbours less the middle, which is a quarter of the Laplacian, so
+  the waves had been running at half the speed they were meant to; the speed is
+  shallow water over the basin now, capped at what the grid can carry, and the
+  coefficient is derived from it. An impulse is a step of velocity integrated
+  until the feature's own curvature turns it round, so it is divided by the
+  radius: a droplet and a body landing both arrive at the amplitude they asked
+  for instead of the clamp deciding. Two things were quietly filling the pool. A
+  cell on the height limit kept exactly the velocity the pull to the still line
+  was taking off, so anything that touched the limit stayed there. And the field
+  was masked to the pool, so every sample the advection took near the rim came
+  back low and the curvature answered by lifting it: the wall poured water in
+  until the whole pool stood most of a metre proud of its own line, which is what
+  the rider was floating on. The cells past the rim are ghosts of the ones inside
+  now. With those gone the field is quiet between events, so the damping is a
+  wave's life rather than a per-step number, and a crest breaks at the slope the
+  steepest wave water can stand actually carries.
 
 ### 8. Mobile (parked)
 
