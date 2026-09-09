@@ -59,6 +59,14 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 4.5, the tube as a screen (Step 5) | tube | webgl | 331 (2.8) | 210 (4.9) |
 | 4.5, the tube as a screen (Step 5) | pool | webgpu | 159 (1.4) | 95 (1.8) |
 | 4.5, the tube as a screen (Step 5) | pool | webgl | 160 (6.9) | 102 (11.6) |
+| 5.0, Build 4 on this run (baseline) | tube | webgpu | 309 (0.6) | 221 (0.9) |
+| 5.0, Build 4 on this run (baseline) | tube | webgl | 346 (2.7) | 214 (4.6) |
+| 5.0, Build 4 on this run (baseline) | pool | webgpu | 163 (1.7) | 96 (1.8) |
+| 5.0, Build 4 on this run (baseline) | pool | webgl | 164 (6.8) | 104 (9.8) |
+| 5.1, under the surface (Step 1) | tube | webgpu | 348 (0.6) | 220 (0.9) |
+| 5.1, under the surface (Step 1) | tube | webgl | 346 (2.7) | 214 (4.5) |
+| 5.1, under the surface (Step 1) | pool | webgpu | 149 (0.8) | 91 (0.8) |
+| 5.1, under the surface (Step 1) | pool | webgl | 163 (7.0) | 102 (11.0) |
 
 Notes:
 
@@ -135,6 +143,13 @@ Notes:
   unchanged within noise, because the grid is frustum-culled until the pool comes into view.
   The 3.3 pool rows were measured the same day, on 3.3 sources, as the before-and-after pair.
   257 fps at 3440×1440 with MSAA 4× is over four times the 60 fps budget.
+
+- Build 5 Step 1 costs the pool phase 0.6 ms a frame on WebGPU and 0.2 ms on the WebGL 2 tier:
+  the surface grid is double-sided and branches on which side the camera is on, the scene fog is
+  the body of water while the camera is under it, and the bubble emitter shares the spray rig
+  rather than adding one. The tube phase is untouched — nothing of it runs above the water line.
+  The 5.0 rows are Build 4 re-measured on the same machine the same day, so the pair is
+  comparable; the recorded 4.5 rows were taken on a colder run.
 
 - Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
   twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution

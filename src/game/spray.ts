@@ -11,6 +11,7 @@ import {
   instanceIndex,
   instancedArray,
   length,
+  mix,
   linearDepth,
   sin,
   smoothstep,
@@ -36,6 +37,16 @@ const BURST = 900;
 const MIST = 48;
 /** How long the mist at a splash takes to fade, s. */
 const MIST_LIFE = 3.2;
+/** Buoyancy on a bubble, m/s², against a drag that settles it near a walking pace. */
+const BUBBLE_RISE = 5.4;
+const BUBBLE_DRAG = 2.4;
+/** A bubble is a shell, not a dot: it draws this many times a droplet's size. */
+const BUBBLE_SIZE = 1.1;
+/**
+ * How much brighter a bubble draws. The sprites are additive, so a shell has to
+ * out-run the lit water behind it to read at all.
+ */
+const BUBBLE_LIGHT = 1.6;
 
 const WHITE = new THREE.Color(1, 1, 1);
 
@@ -56,9 +67,10 @@ export type SprayOptions = {
  * gravity, drag and death; the draw is an instanced sprite lit by the rider's
  * lamp and faded softly against whatever is behind it.
  *
- * Two emitters: the tube, where the film sheets off the wall under the rider
- * and streams past the camera, and the splash, a one-shot burst plus a puff of
- * mist that hangs over the pool while it clears.
+ * Three emitters: the tube, where the film sheets off the wall under the rider
+ * and streams past the camera; the splash, a one-shot burst plus a puff of mist
+ * that hangs over the pool while it clears; and bubbles, which rise instead of
+ * falling and burst at the water line.
  */
 export type Spray = {
   /**
@@ -80,8 +92,18 @@ export type Spray = {
    * so a section change is a uniform swap rather than a rebuild.
    */
   setTheme: (theme: Theme, t?: number) => void;
-  /** One-shot burst of droplets and a puff of mist at a world point. */
-  splash: (position: THREE.Vector3) => void;
+  /**
+   * One-shot burst of droplets and a puff of mist at a world point.
+   * `strength` scales both, so a breach costs a fraction of a splash.
+   */
+  splash: (position: THREE.Vector3, strength?: number) => void;
+  /**
+   * Ask for `count` bubbles this frame, spawned within `spread` metres of a
+   * world point. They climb, wobble, and burst at the water line.
+   */
+  bubbles: (position: THREE.Vector3, spread: number, count: number) => void;
+  /** Where bubbles burst; the pool the rider is in sets it. */
+  setWaterLine: (y: number) => void;
   update: (dt: number, riderLight: THREE.Vector3) => void;
   info: () => { count: number };
   dispose: () => void;
@@ -99,19 +121,23 @@ export function createSpray(
   /** First slot this frame's spawns land in, and how many of them there are. */
   const uCursor = uniform(0);
   const uCount = uniform(0);
-  /** 0 emits a stream off the wall, 1 throws a burst up and out. */
+  /** 0 streams off the wall, 1 throws a burst up and out, 2 releases bubbles. */
   const uKind = uniform(0);
   const uOrigin = uniform(new THREE.Vector3());
   const uTangent = uniform(new THREE.Vector3(0, 0, -1));
   const uRadial = uniform(new THREE.Vector3(0, -1, 0));
   const uBinormal = uniform(new THREE.Vector3(1, 0, 0));
   const uSpeed = uniform(0);
+  /** How wide a bubble plume spawns, m, and the surface they burst at. */
+  const uSpread = uniform(0.6);
+  const uWaterY = uniform(-1000);
   /** Mist anchor and how much of it is left, 0 to 1. */
   const uMist = uniform(new THREE.Vector4(0, -1000, 0, 0));
   const uMistColor = uniform(new THREE.Vector3(1, 1, 1));
   const uDroplet = uniform(new THREE.Vector3(1, 1, 1));
 
-  // xyz position, w remaining life; xyz velocity, w a per-spawn random.
+  // xyz position, w remaining life; xyz velocity, w 1 for a bubble and 0 for
+  // anything falling.
   const state = instancedArray(N, "vec4");
   const motion = instancedArray(N, "vec4");
 
@@ -137,7 +163,18 @@ export function createSpray(
         const r1 = hash(seed);
         const r2 = hash(seed.add(uint(1)));
         const r3 = hash(seed.add(uint(2)));
-        If(uKind.greaterThan(0.5), () => {
+        If(uKind.greaterThan(1.5), () => {
+          // Bubbles: a column of air torn under with the rider, climbing back.
+          const ang = r1.mul(Math.PI * 2);
+          const rad = r2.mul(uSpread);
+          s.assign(
+            vec4(
+              uOrigin.add(vec3(cos(ang).mul(rad), r3.sub(0.7).mul(uSpread), sin(ang).mul(rad))),
+              r3.mul(1.1).add(0.9),
+            ),
+          );
+          m.assign(vec4(cos(ang).mul(0.4), r2.mul(0.8).add(0.3), sin(ang).mul(0.4), 1));
+        }).ElseIf(uKind.greaterThan(0.5), () => {
           // Splash: up and out from the point of entry.
           const ang = r1.mul(Math.PI * 2);
           const out = r2.mul(5).add(2);
@@ -147,9 +184,7 @@ export function createSpray(
               r2.mul(0.7).add(0.7),
             ),
           );
-          m.assign(
-            vec4(cos(ang).mul(out), r3.mul(6).add(3.5), sin(ang).mul(out), r1),
-          );
+          m.assign(vec4(cos(ang).mul(out), r3.mul(6).add(3.5), sin(ang).mul(out), 0));
         }).Else(() => {
           // Tube: off the wall just ahead of the rider, then back past them.
           const p = uOrigin
@@ -160,10 +195,7 @@ export function createSpray(
           const lift = r2.mul(2.6).add(1.4);
           const drift = r3.sub(0.5).mul(3);
           m.assign(
-            vec4(
-              uTangent.mul(along).sub(uRadial.mul(lift)).add(uBinormal.mul(drift)),
-              r1,
-            ),
+            vec4(uTangent.mul(along).sub(uRadial.mul(lift)).add(uBinormal.mul(drift)), 0),
           );
         });
       }).Else(() => {
@@ -171,9 +203,20 @@ export function createSpray(
       });
     }).Else(() => {
       const v = m.xyz.toVar();
-      v.y.subAssign(uDt.mul(9.8));
-      v.mulAssign(float(1).sub(uDt.mul(0.6)));
-      s.assign(vec4(s.xyz.add(v.mul(uDt)), life));
+      If(m.w.greaterThan(0.5), () => {
+        const wobble = float(i).mul(0.37).add(uFrame.mul(0.09));
+        v.y.addAssign(uDt.mul(BUBBLE_RISE));
+        v.x.addAssign(sin(wobble).mul(uDt).mul(1.8));
+        v.z.addAssign(cos(wobble.mul(1.3)).mul(uDt).mul(1.8));
+        v.mulAssign(float(1).sub(uDt.mul(BUBBLE_DRAG)));
+      }).Else(() => {
+        v.y.subAssign(uDt.mul(9.8));
+        v.mulAssign(float(1).sub(uDt.mul(0.6)));
+      });
+      const p = s.xyz.add(v.mul(uDt)).toVar();
+      // A bubble that reaches the surface bursts through it.
+      const popped = m.w.mul(p.y.step(uWaterY));
+      s.assign(vec4(p, mix(life, float(-1), popped)));
       m.assign(vec4(v, m.w));
     });
 
@@ -184,6 +227,7 @@ export function createSpray(
   // Draw: an instanced sprite, lit by the rider's lamp, soft against the scene.
   const attr = state.toAttribute();
   const worldP = attr.xyz;
+  const isBubble = motion.toAttribute().w;
   const remain = attr.w.clamp(0, MAX_LIFE).div(MAX_LIFE);
   const dRider = length(uRider.sub(worldP));
   // The rider's lamp lights the droplets; capped, or the near ones blow out to
@@ -192,9 +236,18 @@ export function createSpray(
     .div(dRider.mul(dRider).add(1))
     .clamp(0, 1.6)
     .add(0.15);
-  const radial = smoothstep(0.5, 0.05, length(uv().sub(0.5)));
+  // A droplet is a lit dot; a bubble is a shell, bright where its skin turns
+  // away from the eye and nearly clear through the middle.
+  const fromCentre = length(uv().sub(0.5));
+  const disc = smoothstep(0.5, 0.05, fromCentre);
+  const shell = smoothstep(0.5, 0.44, fromCentre)
+    .mul(smoothstep(0.3, 0.4, fromCentre))
+    .add(disc.mul(0.12));
+  const radial = mix(disc, shell, isBubble);
   // A droplet on the lens reads as a white blob, so the last half metre fades.
-  const nearFade = smoothstep(0.25, 0.9, length(cameraPosition.sub(worldP)));
+  // A bubble at arm's length is the point of it, so it gives up far less.
+  const fromEye = length(cameraPosition.sub(worldP));
+  const nearFade = mix(smoothstep(0.25, 0.9, fromEye), smoothstep(0.1, 0.3, fromEye), isBubble);
   const softFade = viewportLinearDepth
     .sub(linearDepth())
     .mul(cameraFar.sub(cameraNear))
@@ -207,13 +260,17 @@ export function createSpray(
     blending: THREE.AdditiveBlending,
   });
   sprayMat.positionNode = worldP;
-  sprayMat.scaleNode = vec2(float(options.size).mul(remain.mul(0.6).add(0.6)));
-  sprayMat.colorNode = uDroplet.mul(att);
+  // Bubbles come in a spread of sizes; one size reads as a pattern.
+  const bubbleScale = float(BUBBLE_SIZE).mul(hash(instanceIndex.add(uint(31))).mul(0.9).add(0.35));
+  sprayMat.scaleNode = vec2(
+    float(options.size).mul(remain.mul(0.6).add(0.6)).mul(mix(float(1), bubbleScale, isBubble)),
+  );
+  sprayMat.colorNode = uDroplet.mul(att).mul(mix(float(1), float(BUBBLE_LIGHT), isBubble));
   sprayMat.opacityNode = radial
     .mul(remain.smoothstep(0, 0.35))
     .mul(softFade)
     .mul(nearFade)
-    .mul(0.42);
+    .mul(mix(float(0.42), float(0.3), isBubble));
   const spray = new THREE.Sprite(sprayMat);
   spray.count = N;
   spray.frustumCulled = false;
@@ -284,6 +341,7 @@ export function createSpray(
   let tubeSpeed = 0;
   let tubeOn = false;
   let burst = 0;
+  let bubbleWanted = 0;
   let mistLife = 0;
   const rgb = new THREE.Color();
   const rgbVec = new THREE.Vector3();
@@ -310,10 +368,19 @@ export function createSpray(
       rgb.lerp(WHITE, 0.55);
       uDroplet.value.lerp(rgbVec.set(rgb.r, rgb.g, rgb.b), t);
     },
-    splash(position) {
-      burst = BURST;
+    bubbles(position, spread, count) {
+      if (count <= 0) return;
       uOrigin.value.copy(position);
-      mistLife = MIST_LIFE;
+      uSpread.value = spread;
+      bubbleWanted += count;
+    },
+    setWaterLine(y) {
+      uWaterY.value = y;
+    },
+    splash(position, strength = 1) {
+      burst = Math.round(BURST * strength);
+      uOrigin.value.copy(position);
+      mistLife = MIST_LIFE * strength;
       uMist.value.set(position.x, position.y, position.z, 1);
     },
     update(dt, riderLight) {
@@ -323,18 +390,21 @@ export function createSpray(
       uRider.value.copy(riderLight);
 
       mistLife = Math.max(0, mistLife - dt);
-      const fade = mistLife / MIST_LIFE;
+      const fade = Math.min(1, mistLife / MIST_LIFE);
       uMist.value.w = fade * fade;
       mist.visible = fade > 0.01;
 
       // One spawn window per frame: the splash owns it outright on the frame it
-      // happens, the tube's stream has it the rest of the time.
+      // happens, bubbles next, and the tube's stream has it the rest of the time.
       let count = 0;
       if (burst > 0) {
         count = Math.min(burst, N);
         burst = 0;
         carry = 0;
         uKind.value = 1;
+      } else if (bubbleWanted > 0) {
+        count = Math.min(bubbleWanted, N);
+        uKind.value = 2;
       } else if (tubeOn) {
         carry += (tubeSpeed - SPEED_FLOOR) * RATE * uDt.value;
         count = Math.min(Math.floor(carry), N);
@@ -343,6 +413,7 @@ export function createSpray(
       } else {
         carry = 0;
       }
+      bubbleWanted = 0;
       uCursor.value = cursor;
       uCount.value = count;
       cursor = (cursor + count) % N;

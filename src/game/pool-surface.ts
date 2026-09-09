@@ -1,6 +1,7 @@
 import * as THREE from "three/webgpu";
 import {
   Fn,
+  If,
   abs,
   atan,
   attributeArray,
@@ -71,6 +72,30 @@ const STEP = 1 / 60;
 /** How deep the floatie presses the surface, m. */
 const DISH = 0.1;
 /**
+ * How far the surface keeps going past the pool wall, m.
+ *
+ * The grid is cut to a circle per pixel. Cut it at the wall and the two are
+ * coplanar, so every swell shows the cut; cut it outside and the wall, which
+ * every ray from inside the pool hits first, hides the edge.
+ */
+const RIM_OVERSHOOT = 0.5;
+/**
+ * Cosine of the critical angle looking up from inside the water, and the width
+ * of the edge. Steeper than this and the surface is a mirror of the water body;
+ * shallower and the world above is squeezed through it.
+ */
+const SNELL_EDGE = 0.7;
+const SNELL_SOFT = 0.1;
+/** How far the world above is squeezed toward the middle of that window. */
+const SNELL_SQUEEZE = 0.74;
+/**
+ * How far the ripples are exaggerated for the underside. Seen from below the
+ * window is what shows the ripples, and the real slope of a metre-scale wave
+ * moves that edge by a couple of degrees.
+ */
+const UNDER_RIPPLE = 9;
+
+/**
  * How far past the pool wall the surface keeps drawing, m.
  *
  * The grid is alpha-tested to cut the pool out of a square, and a discarding
@@ -80,6 +105,22 @@ const DISH = 0.1;
  * radius there is nothing to see and the surface simply stops drawing.
  */
 const VISIBLE_MARGIN = 24;
+
+/** The open pool's waves, as `x` and `z` wavenumber, rate, and amplitude. */
+const SWELL: readonly (readonly [number, number, number, number])[] = [
+  [1.4, 0.6, 1.8, 0.03],
+  [-0.8, 1.7, -1.3, 0.024],
+  [2.6, -2.1, 2.9, 0.012],
+  [0.31, 0.24, 0.55, 0.04],
+  [-0.21, 0.37, -0.41, 0.028],
+];
+
+/** The CPU twin of the wave sum, in metres about the still water line. */
+function swellAt(x: number, z: number, t: number): number {
+  let sum = 0;
+  for (const [kx, kz, w, a] of SWELL) sum += Math.sin(x * kx + z * kz + t * w) * a;
+  return sum;
+}
 
 export type PoolSurfaceOptions = {
   /** "compute" runs the height field, "analytic" the three-wave tier. */
@@ -101,10 +142,13 @@ export type PoolSurfaceOptions = {
  * Shape is a whirlpool funnel driven by the ride's `whirlEnergy` — an
  * energy-driven throat, three spiral ridges, noise chop, foam at the lip and
  * along the crests — plus ripples: a shallow-water height field stepped in
- * compute on WebGPU, analytic waves on the WebGL 2 tier. Shading is planar
- * reflection at half resolution, refraction of the basin through the shared
- * viewport texture, Beer-Lambert absorption from scene depth, a Fresnel mix
- * between the two, and sun and rider-light specular on top.
+ * compute on WebGPU, analytic waves on the WebGL 2 tier.
+ *
+ * From above, shading is planar reflection at half resolution, refraction of
+ * the basin through the shared viewport texture, Beer-Lambert absorption from
+ * scene depth, a Fresnel mix between the two, and sun and rider-light specular
+ * on top. From below it is a ceiling: a mirror of the water body outside the
+ * critical angle, the world above squeezed through Snell's window inside it.
  */
 export type PoolSurface = {
   /**
@@ -125,6 +169,13 @@ export type PoolSurface = {
    * surface normal, so this is what banks the horizon inside the vortex.
    */
   slopeAt: (r: number, energy: number) => number;
+  /**
+   * World height of the surface over world x/z, funnel and waves together.
+   * What the camera is tested against to decide it has gone under.
+   */
+  waterLineAt: (x: number, z: number, energy: number, elapsed: number) => number;
+  /** Tell the surface which side of itself the camera is on. */
+  setUnder: (under: boolean) => void;
   /** Ring a splash or a landing droplet into the height field, at world x/z. */
   impulse: (x: number, z: number, radius: number, amplitude: number) => void;
   /** Where the rider's floatie presses the surface; `on` false lifts it out. */
@@ -159,6 +210,8 @@ export function createPoolSurface(
   const uWake = uniform(new THREE.Vector3());
   /** x, z, radius, amplitude of one splash or droplet, spent in a single step. */
   const uImpulse = uniform(new THREE.Vector4(0, 0, 0.7, 0));
+  /** 1 while the camera is under the water line. */
+  const uUnder = uniform(0);
   const uAbsorb = uniform(0.55);
   const uFoamAmount = uniform(0.72);
   const uGloss = uniform(260);
@@ -193,17 +246,18 @@ export function createPoolSurface(
   };
 
   /**
-   * The pool's own motion: three directional waves and a slow noise swell.
-   * Both tiers carry it. A height field that no one has splashed settles to
-   * dead flat, and a dead-flat pool at a grazing angle is a sheet of paint.
+   * The pool's own motion: chop over a long swell, as directional waves. Both
+   * tiers carry it, and the numbers are shared with the CPU twin below, so the
+   * game can ask where the water line is and get the surface the rider sees.
+   * A height field that no one has splashed settles to dead flat, and a
+   * dead-flat pool at a grazing angle is a sheet of paint.
    */
   const waves = (p: V2): F => {
-    const t = uTime;
-    const w1 = sin(p.x.mul(1.4).add(p.y.mul(0.6)).add(t.mul(1.8))).mul(0.03);
-    const w2 = sin(p.x.mul(-0.8).add(p.y.mul(1.7)).sub(t.mul(1.3))).mul(0.024);
-    const w3 = sin(p.x.mul(2.6).sub(p.y.mul(2.1)).add(t.mul(2.9))).mul(0.012);
-    const swell = mx_noise_float(vec3(p.mul(0.45), t.mul(0.3))).mul(0.045);
-    return w1.add(w2).add(w3).add(swell);
+    let sum: F = float(0);
+    for (const [kx, kz, w, a] of SWELL) {
+      sum = sum.add(sin(p.x.mul(kx).add(p.y.mul(kz)).add(uTime.mul(w))).mul(a));
+    }
+    return sum;
   };
 
   /**
@@ -364,17 +418,17 @@ export function createPoolSurface(
   const waterTint = mix(uWater, uThroat, throatAmount);
 
   const nView = transformDirection(normalWorld, cameraViewMatrix);
-  const distortion = nView.xy.mul(0.045);
-  const refrUV = viewportSafeUV(screenUV.add(distortion));
+  const distortion = nView.xy.mul(mix(float(0.045), float(0.1), uUnder));
+  // Looking up from inside the water, everything above the surface arrives
+  // through Snell's window: squeezing the sample toward the middle of the
+  // screen is that squeeze, and one fetch then serves both sides of the water.
+  const squeezed = screenUV.sub(0.5).mul(SNELL_SQUEEZE).add(0.5);
+  const refrUV = viewportSafeUV(mix(screenUV, squeezed, uUnder).add(distortion));
   const behind = options.refract ? viewportSharedTexture(refrUV).rgb : waterTint.mul(0.25);
   // Beer-Lambert from how much water the eye is looking through: scene depth
   // behind the surface, minus the surface's own.
   const sceneLD = linearDepth(viewportDepthTexture(refrUV));
   const thickness = sceneLD.sub(linearDepth()).max(0).mul(cameraFar.sub(cameraNear));
-  const absorb = exp(thickness.mul(uAbsorb).mul(waterTint.oneMinus()).negate());
-  // What the water scatters back on the way out; without it a dark basin makes
-  // the pool a hole rather than a body of water.
-  const refracted = behind.mul(absorb).add(waterTint.mul(absorb.oneMinus()).mul(0.72));
 
   const view = normalize(cameraPosition.sub(positionWorld));
   const fresnel = pow(dot(view, normalWorld).max(0).oneMinus(), 5).mul(0.96).add(0.04);
@@ -395,23 +449,62 @@ export function createPoolSurface(
   const dRider = length(toRider);
   const att = float(6).div(dRider.mul(dRider).add(1));
   const specRider = pow(dot(normalWorld, normalize(view.add(toRider.div(dRider)))).max(0), 90).mul(att);
-  const spec = vec3(specSun.add(specRider));
+  const spec = specSun.add(specRider);
 
-  const surface = mix(refracted, reflection, fresnel).add(spec).add(waterTint.mul(0.1));
-  const finalColor = mix(surface, uFoam, foam);
+  // Which side of the water the camera is on is a uniform, not the facing of
+  // the triangle: everything sampled from a texture is fetched at the top,
+  // because WGSL will not sample inside a branch.
+  const shadeSurface = Fn(() => {
+    const behindC = vec3(behind).toVar();
+    const mirrorC = vec3(reflection).toVar();
+    const specC = spec.toVar();
+    const tint = waterTint.toVar();
+    const froth = foam.toVar();
+    const rgb = vec3(0).toVar();
+    If(uUnder.lessThan(0.5), () => {
+      // Beer-Lambert from how much water the eye is looking through: scene
+      // depth behind the surface, minus the surface's own. The scatter term is
+      // what the water throws back on the way out; without it a dark basin
+      // makes the pool a hole rather than a body of water.
+      const absorb = exp(thickness.mul(uAbsorb).mul(tint.oneMinus()).negate());
+      const refracted = behindC.mul(absorb).add(tint.mul(absorb.oneMinus()).mul(0.72));
+      const air = mix(refracted, mirrorC, fresnel).add(specC).add(tint.mul(0.1));
+      rgb.assign(mix(air, uFoam, froth));
+    }).Else(() => {
+      // From beneath, the surface is a ceiling. Steeper than the critical angle
+      // it is a mirror of the water body — its own colour, the foam from
+      // underneath, the rider's lamp — because nothing reflects the basin;
+      // shallower, the world above arrives squeezed through the window, with
+      // the rim of it lit the way the edge of Snell's window is.
+      const rippled = vec3(
+        slope.x.negate().mul(UNDER_RIPPLE),
+        1,
+        slope.y.negate().mul(UNDER_RIPPLE),
+      ).normalize();
+      const cosU = abs(dot(view, rippled));
+      const windowed = smoothstep(SNELL_EDGE, SNELL_EDGE + SNELL_SOFT, cosU);
+      const halo = smoothstep(SNELL_SOFT, 0, abs(cosU.sub(SNELL_EDGE)));
+      const silver = tint.mul(0.45).add(specC.mul(0.8));
+      rgb.assign(
+        mix(silver, behindC, windowed).add(uFoam.mul(froth.mul(0.55))).add(tint.mul(halo.mul(0.5))),
+      );
+    });
+    return vec4(rgb, specC);
+  });
 
-  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true });
+  const shaded = shadeSurface().toVar();
+
+  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, side: THREE.DoubleSide });
   mat.positionNode = vec3(positionLocal.x, positionLocal.y, heightNode);
-  mat.colorNode = finalColor;
-  // The pool is cut out of the square grid per pixel; the wall hides the seam.
-  mat.opacityNode = step(r, uRadius);
+  mat.colorNode = shaded.rgb;
+  mat.opacityNode = step(r, uRadius.add(RIM_OVERSHOOT));
   mat.alphaTest = 0.5;
-  // The water is unlit, so it writes no emissive of its own. Hand bloom a sixth
-  // of the picture plus half the specular: glints and foam flare and the pool
-  // itself only lifts, as it did on the flat disc this replaces.
+  // The water is unlit, so it writes no emissive of its own. Hand bloom a tenth
+  // of the picture plus a third of the specular: glints and foam flare and the
+  // pool itself only lifts.
   mat.mrtNode = mrt({
     ...colorTargets(output),
-    emissive: vec4(surface.mul(0.1).add(spec.mul(0.35)), 1),
+    emissive: vec4(shaded.rgb.mul(0.1).add(shaded.a.mul(0.35)), 1),
   });
 
   const geo = new THREE.PlaneGeometry(PLANE_HALF * 2, PLANE_HALF * 2, GRID - 1, GRID - 1);
@@ -447,6 +540,13 @@ export function createPoolSurface(
     u.value += (target - u.value) * t;
   };
 
+  const funnelHeight = (radius: number, e: number) => {
+    if (!pool || e <= 0) return 0;
+    const s = SIGMA_MIN + (SIGMA_MAX - SIGMA_MIN) * e;
+    const q = radius / pool.radius / s;
+    return -FUNNEL_DEPTH * e * (Math.exp(-q * q) * 0.55 + Math.exp(-q) * 0.45);
+  };
+
   const setTheme = (theme: Theme, t = 1) => {
     easeColor(uThroat, theme.fog, t);
     easeColor(uWater, theme.water, t);
@@ -470,18 +570,22 @@ export function createPoolSurface(
       mesh.position.set(pool.center.x, pool.waterY, pool.center.z);
       pending.length = 0;
     },
-    heightAt(radius, e) {
-      if (!pool || e <= 0) return 0;
-      const s = SIGMA_MIN + (SIGMA_MAX - SIGMA_MIN) * e;
-      const q = radius / pool.radius / s;
-      return -FUNNEL_DEPTH * e * (Math.exp(-q * q) * 0.55 + Math.exp(-q) * 0.45);
-    },
+    heightAt: funnelHeight,
     slopeAt(radius, e) {
       if (!pool || e <= 0) return 0;
       const s = SIGMA_MIN + (SIGMA_MAX - SIGMA_MIN) * e;
       const scale = pool.radius * s;
       const q = radius / scale;
       return (FUNNEL_DEPTH * e * (1.1 * q * Math.exp(-q * q) + 0.45 * Math.exp(-q))) / scale;
+    },
+    waterLineAt(x, z, e, elapsed) {
+      if (!pool) return 0;
+      const dx = x - pool.center.x;
+      const dz = z - pool.center.z;
+      return pool.waterY + funnelHeight(Math.hypot(dx, dz), e) + swellAt(dx, dz, elapsed);
+    },
+    setUnder(under) {
+      uUnder.value = under ? 1 : 0;
     },
     impulse(x, z, radius, amplitude) {
       if (!pool || pending.length > 8) return;
