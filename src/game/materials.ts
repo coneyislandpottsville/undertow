@@ -83,7 +83,7 @@ const REFLECT_BEND = 5;
 
 /** Per-material flow distance, m, advanced by scrollTube(). */
 const flows = new WeakMap<THREE.Material, { value: number }>();
-/** Shared clock for the idle trickle; scrollCurrents() advances it once per frame. */
+/** Seconds, advanced once a frame: the film's idle trickle and the panels drift on it. */
 const uClock = uniform(0);
 
 let streakTex: THREE.CanvasTexture | null = null;
@@ -543,6 +543,6 @@ export function createExitRingMaterial(theme: Theme): THREE.MeshStandardNodeMate
 }
 
 /** Advance the shared clock the film's idle trickle and the panels drift on. */
-export function scrollCurrents(dt: number) {
+export function tickMaterials(dt: number) {
   uClock.value += dt;
 }
