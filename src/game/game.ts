@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { FrameMeter, type LabApi } from "@/lab/harness";
 import { RideAudio } from "./audio";
-import { generateSection, startPose, type RideSection } from "./generate";
+import { exitSeed, generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
@@ -9,9 +9,9 @@ import { createRidePost, type RidePost } from "./post";
 import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
 import { createSpray, sprayOptions, type Spray } from "./spray";
 import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
-import { forkSeed, seedFromQuery } from "./rng";
+import { seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
-import type { Theme } from "./theme";
+import { pinTheme, themeForSeed, type Theme } from "./theme";
 
 const FIXED = 1 / 60;
 const SIT = 1.05;
@@ -215,6 +215,7 @@ export class Game {
             mode: this.mode,
             speed: this.speed,
             drop: this.drop,
+            theme: this.current.theme.id,
             // What the surfaces actually settled on, so a bench row records the
             // tier it measured rather than the one it asked for.
             ...this.poolSurface?.info(),
@@ -265,7 +266,14 @@ export class Game {
     this.camera.add(this.floatie);
 
     const pose = startPose();
-    this.current = generateSection(this.worldSeed, pose.position, pose.dir, 0, true);
+    pinTheme(query.get("theme"));
+    this.current = generateSection(
+      this.worldSeed,
+      pose.position,
+      pose.dir,
+      themeForSeed(this.worldSeed),
+      true,
+    );
     this.scene.add(this.current.group);
     this.sections.push(this.current);
     this.dist = 2.4;
@@ -294,6 +302,7 @@ export class Game {
       getWhirl: () => ({ energy: this.whirlEnergy, r: this.whirlR }),
       getPosition: () => [this.px, this.py, this.pz],
       getSeed: () => this.worldSeed.toString(16),
+      getTheme: () => this.current.theme.id,
       getBackend: () => this.backend,
       release: () => this.focus(),
       setKeys: (codes) => this.input.setKeys(codes),
@@ -766,12 +775,13 @@ export class Game {
   private generateExit(exit: RideSection["exits"][number]) {
     if (exit.next) return;
     // Child seeds hang off the parent's seed and the exit taken, so any route
-    // through the tree is the same world on every replay of `?seed=`.
-    const seed = forkSeed(this.current.seed, exit.index + 1);
+    // through the tree is the same world on every replay of `?seed=`. The mouth
+    // in the pool wall is already dressed in the theme this returns.
+    const seed = exitSeed(this.current.seed, exit.index);
     const start = exit.position.clone();
     const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
     start.addScaledVector(outward, -0.4);
-    const section = generateSection(seed, start, exit.tangent, this.drop, false, [
+    const section = generateSection(seed, start, exit.tangent, exit.theme, false, [
       this.current.pool,
     ]);
     exit.next = section;
@@ -1024,6 +1034,7 @@ declare global {
       getWhirl?: () => { energy: number; r: number };
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
+      getTheme?: () => string;
       /** "webgpu" or "webgl" once the renderer is up, "pending" before. */
       getBackend?: () => string;
       release?: () => void;

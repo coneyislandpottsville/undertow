@@ -43,7 +43,7 @@ import { rippleNormalCanvas, streakCanvas } from "./textures";
  * Everything is a node material on WebGPURenderer (WebGL 2 backend as the
  * fallback); the factory names are the seam generate.ts and game.ts build on.
  */
-export { THEMES, themeAt, type Theme } from "./theme";
+export { THEMES, themeAt, themeForSeed, type Theme } from "./theme";
 import type { Theme } from "./theme";
 
 type V2 = Node<"vec2">;
@@ -303,7 +303,7 @@ export function createBasinMaterial(
     0.5,
   );
   const filament = pow(abs(n).oneMinus().max(0), 8);
-  const reach = smoothstep(3.5, 0, height).max(
+  const reach = smoothstep(2.4, 0, height).max(
     mix(float(1), float(0.4), smoothstep(0, 6, depth)).mul(submerged),
   );
   // Light pools in the rock's hollows rather than lying flat across it.
@@ -311,10 +311,10 @@ export function createBasinMaterial(
     .mul(reach)
     .mul(erosion.mul(0.8).add(0.4))
     .mul(warp.mul(0.4).add(0.7))
-    .mul(pool.caustic * (flat ? 1 : 0.45));
+    .mul(pool.caustic * (flat ? 1 : 0.4));
   // The pool is the brightest thing in the basin; the rock around it catches
   // that light long before any lamp reaches it.
-  const bounce = smoothstep(2.5, 0, height).mul(submerged.oneMinus()).mul(pool.bounce);
+  const bounce = smoothstep(1.8, 0, height).mul(submerged.oneMinus()).mul(pool.bounce);
 
   const mat = new THREE.MeshStandardNodeMaterial({
     metalness: pool.wallMetal,
