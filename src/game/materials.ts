@@ -379,7 +379,7 @@ export function createSheetMaterial(
     uv().add(vec2(0, 0.5)).add(bend.mul(REFLECT_BEND)),
     length,
   );
-  const mirrored = far.wall.mul(0.6).add(far.panel.mul(1.4));
+  const mirrored = far.wall.mul(0.6).add(far.panel.mul(1.4)).mul(sheet.mirror);
   // The rider's lamp is at the eye, so the highlight is retroreflective: the
   // ripples that happen to face the camera light up and the rest do not, which
   // is the glitter path a torch throws down running water.

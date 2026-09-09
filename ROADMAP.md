@@ -41,7 +41,7 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 5, September 2026)
+## Where it stands (Build 6, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -93,20 +93,30 @@ full-screen pass, which is what let both backends have the same water: a
 compute kernel on the WebGL 2 backend reads its storage buffers back as zero,
 so that tier had no height field at all before this.
 
+Done in Build 6 (phase 5, PRs #26 to #32): the water, continued. The pool phase
+bought back a millisecond and a half; the game can read the field, so a wave
+washing over the eye counts and the rider floats on their own splash; the sheet
+in the tube answers the rider rather than the speed their section was drawn for;
+the splash is four sounds on the schedule the water already runs; and each theme
+has its own sheet and its own body of water.
+
 Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 11.7 ms of a 16.7 ms budget at 3440x1440 and the tube
-  phase 5.0 ms. The basin's rock and caustics are five noise evaluations a
-  pixel, drawn again in the reflection pass; that is where to look first if a
-  later step needs the room.
-- The water line the game tests the camera against is the funnel and the waves,
-  not the field, so a splash wave washing over the eye does not read as going
-  under. It would need the field read back, or a coarse CPU copy of it.
-- The tube's sheet is baked per section: it stands where the section's nominal
-  speed says apparent gravity presses, and does not answer the rider's actual
-  speed, their bow wave, or a brake.
+- The pool phase costs 10.2 ms of a 16.7 ms budget at 3440x1440 and the tube
+  phase 4.9 ms. Where the rest of it goes, measured by taking one thing out at a
+  time: the post stack 7.2 ms, the pool surface and its mirror 5.4, the basin
+  4.1, the spray 0.8 — overlapping, because they are mostly the same pixels.
+  The post stack is the one nothing has been taken out of yet: two half-float
+  targets at four samples, a bloom chain, and a full-resolution composite.
+- The field's copy is 128² over the pool, so the CPU sees the water at 30 cm and
+  a frame or two late. Enough for a water line and a float; not enough to read a
+  droplet's landing or to put anything small on the surface.
+- The pool surface reads one half of the ping-pong, which is the last step on an
+  even count and the one before it on an odd one. Following the latest step made
+  the two halves read as mirror images of each other; why was not established,
+  and pinning it, which is what Build 5 did, is what hides it.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand: `?theme=` and `?screen=` are the
   only ways to pick one.
@@ -265,11 +275,65 @@ not. Hold 60 fps at 3440×1440 with MSAA on.
   Also: the basin's grain joins its relief in the last few metres, so rock at
   point-blank range is not a featureless wash.
 
-### 6. Mobile (parked)
+### 6. The water, continued (Build 6)
+
+Numbers per step in `docs/research/ride-bench.md`. Hold 60 fps at 3440×1440 with
+MSAA on.
+
+- Step 1 (PR #26): buying the budget back. The basin's rock goes from seven noise
+  evaluations a pixel to about three and a half — two-dimensional Perlin costs
+  four gradients where three costs eight, and the wall's warp and erosion move a
+  fraction of a period over its whole height, so what the third axis carried is
+  sheared into the plane. The caustics keep the third axis on the wall, where
+  shearing drew the filaments out into streaks, and sit behind a test on whether
+  the water reaches at all. The surface's own detail and foam grain lose the
+  third axis the same way. The zoom blur reads the frame once instead of ten
+  times when it is not blurring; the bloom builds from a third of it; the mirror
+  stops drawing the spray, the mist and the cavern shell. Pool 85 to 98 fps.
+
+- Step 2 (PR #28): the game can see the water. A 128² pass writes the field's
+  height into a byte target and the CPU reads it back asynchronously, so the
+  water line is the field as well as the funnel and the waves: a crown washing
+  over the eye counts as going under, and the seat follows the chop under it
+  with a float's lag. Bubbles do not need the copy — the surface hands the spray
+  rig its water line as a node, so one bursts at the water above it wherever it
+  has drifted. The two backends disagree about which end of a texture the first
+  row is; measured against a splash at a known place, the WebGL 2 tier hands it
+  back upside down. What the readback found: a splash pinned the field against
+  its height clamp and spread for ten seconds, because a clamped patch is level
+  with its neighbours and nothing restores it. The limit spends the velocity that
+  drove past it now, and impulse amplitudes are in metres of water.
+
+- Step 3 (PR #29): hardening. The splash's raining drops came off `Math.random`,
+  so a seed did not lay down the same foam; they come off the section's own seed
+  now. The mirror's plane was the pool's still level, which inside the funnel is
+  metres below the water the camera is over; on the right one it mirrors what is
+  there and turns itself off when the camera goes under.
+
+- Step 4 (PR #30): the sheet answers the rider. The levelling moves from the CPU
+  at build time into the vertex stage, off the ring's apparent gravity as an
+  attribute. Water piles ahead of the rider, the trough sits under them and
+  closes behind into a wake, and the water around them levels to the gravity they
+  are pulling now rather than the one their section was drawn for. The plough is
+  a share of the water that is there, not a depth: in airtime the sheet has all
+  but left the wall.
+
+- Step 5 (PR #31): the splash sounds like what it does. Four voices on the
+  schedule `splashPlan` already ran — the body arriving, the column the crater
+  throws back up, the ring its collapse leaves, and each drop landing, pitched
+  off the same seeded run.
+
+- Step 6 (PR #32): the six themes calibrated. The sheet block was one set of
+  numbers for all six and was judged on the lagoon; every theme has its own now,
+  and a `mirror` knob with it, because the sheet is unlit and the wall it mirrors
+  is not — a bright world needs less of that than a dark one or the water reads
+  as a slab. Glacier's meltwater came out milk at the density the others carry.
+
+### 7. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
 
-### 7. Framing
+### 8. Framing
 
 - Attract mode, seed sharing, share card.
 

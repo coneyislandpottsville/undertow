@@ -60,6 +60,12 @@ export type Theme = {
     foam: number;
     /** The rider lamp's glitter path on the ripples. */
     glint: number;
+    /**
+     * How hard the surface throws the far side of the tube back at grazing
+     * angles. The sheet is unlit and the wall it mirrors is not, so a bright
+     * world needs less of it than a dark one or the water reads as a slab.
+     */
+    mirror: number;
   };
 
   pool: {
@@ -167,6 +173,7 @@ const SHEET: Theme["sheet"] = {
   edge: 0.09,
   foam: 0.3,
   glint: 0.9,
+  mirror: 1,
 };
 
 const POOL: Theme["pool"] = {
@@ -257,7 +264,9 @@ export const THEMES: readonly Theme[] = [
     fog: 0x03080f,
     ring: 0x9fd8ff,
     film: { ...FILM, dry: 0.55, wet: 0.08, tint: 0.45, ringGlow: 0.3 },
-    sheet: SHEET,
+    // Cold water a long way down: little to scatter, and a dark wall it can
+    // mirror hard without the sheet lifting off it.
+    sheet: { ...SHEET, depth: 0.11, absorb: 1.7, scatter: 0.35, glint: 1.1, foam: 0.35, mirror: 1.15 },
     pool: {
       ...POOL,
       bands: 1.4,
@@ -317,7 +326,20 @@ export const THEMES: readonly Theme[] = [
     fog: 0x0a1a10,
     ring: 0xd8ecb0,
     film: { ...FILM, dry: 0.62, wet: 0.16, normalWet: 0.85, tint: 0.5 },
-    sheet: SHEET,
+    // A choked flume: deep, thick, sluggish. Water you cannot see through,
+    // foam the weed has stained, and no polish on it at all.
+    sheet: {
+      ...SHEET,
+      depth: 0.13,
+      depthG: 0.055,
+      absorb: 3,
+      scatter: 0.28,
+      refract: 1.2,
+      edge: 0.045,
+      foam: 0.1,
+      glint: 0.4,
+      mirror: 0.4,
+    },
     pool: {
       ...POOL,
       bands: 1.1,
@@ -332,7 +354,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.42,
       foam: 0.6,
       gloss: 160,
-      under: 0.38,
+      // Murky, but not so murky that the throat and the rock are one green wash.
+      under: 0.32,
       underShade: 0.26,
     },
     screen: {
@@ -377,7 +400,8 @@ export const THEMES: readonly Theme[] = [
     fog: 0x140704,
     ring: 0xffcf9a,
     film: { ...FILM, dry: 0.45, tint: 0.4, glow: 0.06 },
-    sheet: SHEET,
+    // Running thin over hot rock, and carrying the fire rather than the sky.
+    sheet: { ...SHEET, depth: 0.09, absorb: 1.5, scatter: 0.7, refract: 1.7, foam: 0.4, glint: 1, mirror: 0.85 },
     pool: {
       ...POOL,
       wallGlow: 0.42,
@@ -446,7 +470,21 @@ export const THEMES: readonly Theme[] = [
       streak: 0.6,
       metalness: 0.02,
     },
-    sheet: SHEET,
+    // Meltwater: the flume runs full, and it is clear enough to read the wall
+    // through. The wall is already the brightest thing here, so the surface
+    // gives most of it back rather than all.
+    sheet: {
+      ...SHEET,
+      depth: 0.14,
+      depthG: 0.06,
+      absorb: 0.45,
+      scatter: 0.75,
+      refract: 2,
+      edge: 0.07,
+      foam: 0.5,
+      glint: 1.3,
+      mirror: 0.4,
+    },
     pool: {
       ...POOL,
       wallRough: 0.35,
@@ -464,8 +502,10 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.1,
       foam: 0.9,
       gloss: 520,
-      under: 0.07,
-      underShade: 0.62,
+      // The one world you can see the far side of from under the water. At the
+      // density the others carry, meltwater came out milk.
+      under: 0.04,
+      underShade: 0.52,
     },
     screen: {
       ...SCREEN,
@@ -518,7 +558,8 @@ export const THEMES: readonly Theme[] = [
       glow: 0.1,
       ringGlow: 0.5,
     },
-    sheet: SHEET,
+    // A lit tube reflecting hard off polished water is the whole idea here.
+    sheet: { ...SHEET, absorb: 1.4, scatter: 0.6, refract: 1.8, foam: 0.35, glint: 1.2, mirror: 1.2 },
     pool: {
       ...POOL,
       wallRough: 0.4,
