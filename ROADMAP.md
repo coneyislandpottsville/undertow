@@ -41,7 +41,7 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 7, September 2026)
+## Where it stands (Build 8, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -61,17 +61,17 @@ Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 9.5 ms of a 16.7 ms budget at 3440×1440 and the tube
-  phase 4.5, both with four samples. What is left in the post stack is the bloom
+- The pool phase costs 9.3 ms of a 16.7 ms budget at 3440×1440 and the tube
+  phase 4.1, both with four samples. What is left in the post stack is the bloom
   chain, twelve passes at a third of the frame.
-- The field is 256 texels across 38 m, so the pool carries nothing shorter than
+- The flume's field is 512 texels down the tube and 16 across its channel, so it
+  carries nothing shorter than about a metre along it, and the chute's own chop is
+  noise held over the surface rather than water arriving from anywhere.
+- The pool's field is 256 texels across 38 m, so the pool carries nothing shorter than
   about 60 cm; below that the surface's own detail is a shading trick, not water
   that moves. Its copy for the CPU is 128 texels of height and foam with one
   request in flight, so nothing the game reads is finer than 30 cm or newer than
   a frame or two, and the field's velocity is not in it.
-- The flume's sheet is levelled analytically and ploughed by the rider. It is
-  not a field: it has no waves of its own, and nothing crosses between it and
-  the pool it pours into.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand.
 
@@ -118,55 +118,43 @@ The pool's height, velocity and foam live in one half-float target stepped by a
 full-screen pass, which is what let both tiers have the same water: a compute
 kernel on the WebGL 2 backend reads its storage buffers back as zero.
 
-### 7. The water, continued (Build 7)
+### 7. The water, continued (done in Build 7)
+
+The post stack's pass owns a render target, which defaults to no samples, so
+every frame from Build 3 on had been drawn without MSAA; it takes the renderer's
+count now, the emissive channel is written through a headroom the bloom
+multiplies back, and the halo is added after the zoom blur's taps. The copy of
+the field the game reads owes it slope and foam, so the swell shoves a floating
+rider and rolls their horizon and the hiss is the water they are sitting in. A
+node material clamps its colour output to zero, so the field had never had a
+trough; written through `fragmentNode` it oscillates, and its numbers were halved
+against water carrying twice the energy. A crest steeper than the water can stand
+on breaks and whitens along its own line, and two ripples a fifth of a metre
+across carry the near field.
+
+### 8. The water, continued (Build 8)
 
 Hold 60 fps at 3440×1440 with MSAA on.
 
-- Step 1 (PR #33): the post stack, and the antialiasing it was not doing. The
-  renderer's sample count reaches the canvas and the post stack never draws
-  there: its pass owns a render target, which defaults to no samples, so every
-  frame from Build 3 on was drawn without MSAA. The pass takes the renderer's
-  count now and the stack pays for it. The emissive channel is a byte target —
-  a ring at the top of its pulse is the brightest thing written into it, so
-  everything that writes it divides by that headroom and the bloom multiplies it
-  back. The zoom blur spreads over the picture alone and the halo is added after
-  the taps, which takes a full-resolution target and a pass off the stack.
-
-- Step 2 (PR #34): what the copy owes the game. It owes slope, and slope is four
-  more reads of the copy that is already there: a float on tilted water slides
-  down it and sits square on it, so the swell and whatever the field is carrying
-  shove the rider and roll their horizon instead of only lifting them. The
-  copy's third channel was empty, so it carries the foam as well, and the hiss
-  in the pool is the water the rider is actually sitting in. And the flume pours
-  the whole time it is there: the water under the mouth is held at what the fall
-  is doing to it, so rings leave and run out.
-
-- Step 3 (PR #35): the half of the water below the line. A node material clamps
-  its colour output to zero — three does it so render targets come out unsigned
-  — and the field is signed. It had never had a trough: no crater under a
-  splash, no dish under the floatie, no bottom to any wave, and a wave equation
-  with its negative half cut off cannot oscillate, so the field drifted up into
-  its clamp and stayed there. `fragmentNode` is the raw fragment and skips the
-  clamp. That is also what the ping-pong was: the two halves held two differently
-  clipped states, not mirror images, and with the trough back they agree, so the
-  surface reads whichever half the last step wrote. With the other half of every
-  wave back the field carries about twice the energy the old numbers were tuned
-  against, so the foam it throws is halved, the water settles half again as fast,
-  and it is pulled back to the still line — damping the velocity does nothing to
-  water standing still at the wrong level. The curvature is measured around the
-  water a cell is made of rather than around where it ended up: in the vortex
-  those are different parcels, and the difference was feeding the field instead
-  of spreading it.
-
-- Step 4 (PR #36): the wave that falls over. A crest steeper than the water can
-  stand on breaks and whitens along its own line, so a swell reads as a sea
-  rather than a rolling sheet. The slope it is judged by is the four neighbours
-  the curvature is already made of.
-
-- Step 5 (PR #37): the water within reach. The surface had nothing in it finer
-  than a stride, and the near field is most of the screen in the pool. Two more
-  ripples a fifth of a metre across, faded out past a few metres, where a pixel
-  covers more of one than the surface can hold still.
+- Step 1 (PR #38): the sheet in the flume. It was the last analytic water in the
+  ride, and it is a field now (`src/game/sheet-field.ts`), on the pool's model
+  but in the channel's own axes: metres down the flume, and across, the width the
+  water lies at where it levels to each ring's apparent gravity. The edges of the
+  target are therefore the banks, so a wave the rider throws sideways comes back
+  off the far one with no per-ring width to look up. The rider's hull is held as
+  the crater they displace with the water they displaced standing around it, so
+  the bow and the wake are the field's answer and not a shape drawn around them —
+  and a rider at MIN_SPEED is slower than the flume's waves, so the bow runs
+  ahead, while at speed it is swept back. A rider at speed outruns everything
+  they make, so what they see ahead is the chute's own water: a chop held over
+  the whole flume, drifting down it at the speed of the water. Foam is a quantity
+  the sheet carries too, aeration rising with how fast the flume is running,
+  scattered through a drifting grain the way the pool's is. The sheet is drawn on
+  its own geometry, twice down the tube and three times around it, because the
+  tube's rings are what the field would otherwise be facetted by. Both ends are
+  held at what feeds them: the header tank at the top, and the pool at the
+  bottom — whose inflow reads the flume's outfall back, so the water the rider
+  pushes ahead of them is already piling under the mouth as they come out of it.
 
 ### 8. Mobile (parked)
 

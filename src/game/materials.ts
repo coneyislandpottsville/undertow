@@ -42,6 +42,12 @@ import {
   vertexStage,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
+import {
+  SHEET_TEXEL_ACROSS,
+  SHEET_TEXEL_ALONG,
+  sheetField,
+  sheetFieldUV,
+} from "./sheet-field";
 import { rippleNormalCanvas, screenCanvas, streakCanvas, type ScreenArt } from "./textures";
 
 /**
@@ -273,33 +279,15 @@ export function createTubeMaterial(
   return mat;
 }
 
-/**
- * Metres of tube the rider's bow wave and the trough under them spread over.
- *
- * The sheet is the tube's own geometry and its rings are a metre or two apart,
- * so nothing narrower than a few of them survives being drawn.
- */
-const PLOUGH_SPAN = 4;
-/** Spans ahead the bow stands and behind the trough sits. */
-const PLOUGH_BOW_AT = 0.7;
-const PLOUGH_TROUGH_AT = -0.15;
-/** How high the bow stands and how deep the trough cuts, relative to each other. */
-const PLOUGH_BOW = 1;
-const PLOUGH_TROUGH = 1.3;
-/**
- * What share of the water that is there the rider moves. A share and not a
- * depth: there is only so much to plough, and in airtime, where the sheet has
- * all but left the wall, a trough cut in metres would take water that is not
- * there and leave the tube dry.
- */
-const PLOUGH_SHARE = 0.5;
-/** The wake behind: waves per span, how far back they carry, and how tall. */
-const PLOUGH_WAVES = 3;
-const PLOUGH_CARRY = 1.1;
-const PLOUGH_WAKE = 0.45;
+/** Metres of tube over which the water answers the gravity the rider is pulling. */
+const ANSWER_SPAN = 4;
+/** How far the field's slope tilts the sheet's surface against its ripples. */
+const WAVE_RELIEF = 1;
+/** Metres across one bubble of the foam grain. */
+const FOAM_GRAIN = 0.55;
 
-/** Per-material rider state, set by ploughSheet(): where along, how hard, apparent g. */
-const ploughs = new WeakMap<THREE.Material, { value: THREE.Vector3 }>();
+/** Per-material rider state, set by ploughSheet() and setSheetField(). */
+const ploughs = new WeakMap<THREE.Material, { value: THREE.Vector4 }>();
 
 /**
  * The sheet of water the flume runs, as a surface of its own.
@@ -310,48 +298,65 @@ const ploughs = new WeakMap<THREE.Material, { value: THREE.Vector3 }>();
  * far each vertex had to rise is how much water is over it, which is what the
  * wall behind is absorbed by and what the edge is cut on.
  *
- * The rider ploughs it: water piles ahead of them, the trough closes behind
- * into a wake, and the water around them levels to the gravity they are
- * actually pulling rather than the one their section was drawn for — so a
- * brake, a fast entry and their own bow wave all show in the water.
+ * On top of that plane it carries the flume's field (`sheet-field.ts`), whose
+ * axes are the channel's: `span` metres down the tube and, across, the width the
+ * water lies at where it levels to the ring's own gravity. The rider's hull is
+ * pressed into it, so the bow, the trough and the wake are the field's answer
+ * rather than a shape drawn around them, and the water around the rider levels
+ * to the gravity they are actually pulling rather than the one their section was
+ * drawn for.
  */
 export function createSheetMaterial(
   theme: Theme,
   length: number,
   radius: number,
+  span = length,
 ): THREE.MeshBasicNodeMaterial {
   const sheet = theme.sheet;
   const uFlow = uniform(0);
   const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
-  /** Where the rider is along the tube (0 to 1, negative for nowhere), how hard they plough, their g. */
-  const uPlough = uniform(new THREE.Vector3(-1, 0, 1));
+  /** Rider: where along the tube (negative for nowhere), how hard, their g, and whether this sheet is the field's. */
+  const uPlough = uniform(new THREE.Vector4(-1, 0, 1, 0));
 
   // @types/three types a named attribute as Node<string>; the shader knows what
   // the geometry wrote.
   const nominalG = attribute("aG", "float") as unknown as Node<"float">;
   const down = attribute("aDown", "vec3") as unknown as Node<"vec3">;
   const up = down.negate();
-  // Spans of tube from the rider, forward positive. Everything the rider does
-  // to the water is a shape in this.
-  const s = uv().x.sub(uPlough.x).mul(length / PLOUGH_SPAN);
+  const tangent = attribute("tangent", "vec4") as unknown as Node<"vec4">;
+  // Spans of tube from the rider, forward positive.
+  const s = uv().x.sub(uPlough.x).mul(length / ANSWER_SPAN);
   const bell = (x: Node<"float">) => exp(x.mul(x).negate());
-  const behind = smoothstep(0.15, -0.15, s);
-  const plough = bell(s.sub(PLOUGH_BOW_AT))
-    .mul(PLOUGH_BOW)
-    .sub(bell(s.sub(PLOUGH_TROUGH_AT)).mul(PLOUGH_TROUGH))
-    .add(sin(s.mul(PLOUGH_WAVES)).mul(exp(s.min(0).mul(PLOUGH_CARRY))).mul(behind).mul(PLOUGH_WAKE))
-    .mul(uPlough.y);
   // Close to the rider the water answers the gravity they are pulling now; far
   // from them it keeps the one the section was drawn for.
   const g = mix(nominalG, uPlough.z, bell(s.mul(0.6)).mul(uPlough.y.min(1)));
   const stand = float(radius * sheet.depth)
     .add(g.mul(radius * sheet.depthG))
-    .mul(plough.mul(PLOUGH_SHARE).add(1))
     .max(0);
-  // The surface is that plane, so a wall vertex rises to it by whatever it is
-  // short; the ones already above it stay dry.
-  const lift = stand.sub(radius).sub(normalLocal.dot(up).mul(radius)).max(0);
+
+  // The channel the water lies in: how far it reaches either side of the deepest
+  // line, where it levels to this ring's own gravity. The field's across axis is
+  // that half-width, so its edges are the banks whatever the ring is doing.
+  const standNom = float(radius * sheet.depth)
+    .add(nominalG.mul(radius * sheet.depthG))
+    .clamp(0.02, radius * 1.9);
+  const halfWidth = standNom.mul(float(radius * 2).sub(standNom)).sqrt().max(0.35);
+  const bank = normalize(cross(up, tangent.xyz));
+  const fieldUV = sheetFieldUV(
+    uv().x.mul(length / span),
+    normalLocal.dot(bank).mul(radius).div(halfWidth),
+  );
+
+  // The surface is that plane plus whatever the field is carrying, so a wall
+  // vertex rises to it by whatever it is short; the ones already above stay dry.
+  const lift = stand
+    .add(sheetField.sample(fieldUV).x.mul(uPlough.w))
+    .sub(radius)
+    .sub(normalLocal.dot(up).mul(radius))
+    .max(0);
   const depth = vertexStage(lift);
+  const fieldAt = vertexStage(fieldUV);
+  const halfV = vertexStage(halfWidth);
 
   const ripple = flowNormal(uv(), flowDist, length, radius);
   // The wall through the water, pushed about by the ripples: the deeper the
@@ -374,11 +379,27 @@ export function createSheetMaterial(
   // Its surface is the plane the water levelled to, which is across the ring's
   // apparent gravity, not the wall it is lying on.
   const flat = normalize(transformDirection(vertexStage(up), modelWorldMatrix));
-  const tangent = attribute("tangent", "vec4") as unknown as Node<"vec4">;
   const along = normalize(transformDirection(tangent.xyz, modelWorldMatrix));
-  const across = normalize(cross(flat, along));
+  const across = normalize(transformDirection(bank, modelWorldMatrix));
+  // The field is finer than the rings the sheet is drawn on, so its slope goes
+  // in here rather than into the geometry: four taps, in metres per metre.
+  const tap = (dx: number, dy: number): Node<"float"> =>
+    sheetField.sample(fieldAt.add(vec2(dx, dy))).x;
+  const waveSlope = vec2(
+    tap(SHEET_TEXEL_ALONG, 0)
+      .sub(tap(-SHEET_TEXEL_ALONG, 0))
+      .div(2 * SHEET_TEXEL_ALONG * span),
+    tap(0, SHEET_TEXEL_ACROSS)
+      .sub(tap(0, -SHEET_TEXEL_ACROSS))
+      .div(halfV.mul(4 * SHEET_TEXEL_ACROSS)),
+  )
+    .mul(uPlough.w)
+    .mul(WAVE_RELIEF);
   const surfaceNormal = normalize(
-    flat.mul(ripple.z).add(along.mul(ripple.x)).add(across.mul(ripple.y)),
+    flat
+      .mul(ripple.z)
+      .add(along.mul(ripple.x.sub(waveSlope.x)))
+      .add(across.mul(ripple.y.sub(waveSlope.y))),
   );
   const view = normalize(cameraPosition.sub(positionWorld));
   const fresnel = pow(dot(view, surfaceNormal).abs().oneMinus(), 4).mul(0.7).add(0.03);
@@ -397,7 +418,25 @@ export function createSheetMaterial(
   // is the glitter path a torch throws down running water.
   const glint = pow(dot(surfaceNormal, view).max(0), 8).mul(sheet.glint);
   const crest = smoothstep(sheet.edge, 0, depth).mul(smoothstep(0, sheet.edge * 0.3, depth));
-  const foam = crest.mul(sheet.foam).mul(ripple.z.mul(0.5).add(0.6));
+  // Whitewater the field is carrying — the chute's own aeration, the rider's
+  // wake, and the crests it has knocked over against the banks — over the thin
+  // line the sheet foams along wherever it runs out. How much of it there is
+  // decides how much of a drifting grain it fills, so a patch is a scatter of
+  // bubbles closing up rather than a wash of ring colour.
+  const grain = mx_noise_float(
+    vec2(
+      uv().x.mul(length / FOAM_GRAIN).sub(flowDist.div(FOAM_GRAIN)),
+      uv().y.mul(around / FOAM_GRAIN),
+    ),
+  )
+    .mul(0.5)
+    .add(0.5);
+  const froth = sheetField.sample(fieldAt).z.mul(uPlough.w);
+  const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.2), froth)
+    .add(crest)
+    .min(1)
+    .mul(sheet.foam)
+    .mul(ripple.z.mul(0.5).add(0.6));
 
   const mat = new THREE.MeshBasicNodeMaterial({
     transparent: true,
@@ -428,13 +467,25 @@ export function createSheetMaterial(
  * are pushing, `g` the apparent gravity they are pulling.
  */
 export function ploughSheet(mat: THREE.Material, along: number, hard: number, g: number) {
-  ploughs.get(mat)?.value.set(along, hard, g);
+  const p = ploughs.get(mat);
+  if (p) p.value.set(along, hard, g, p.value.w);
+}
+
+/** Hand this sheet the flume's field, or take it back when the rider leaves. */
+export function setSheetField(mat: THREE.Material, amount: number) {
+  const p = ploughs.get(mat);
+  if (p) p.value.w = amount;
 }
 
 /** Push the section's film along at a share of rider speed; call each frame for the section being ridden. */
 export function scrollTube(mat: THREE.Material, dt: number, speed: number) {
   const flow = flows.get(mat);
   if (flow) flow.value += FILM_FLOW * Math.max(0, speed) * dt;
+}
+
+/** How fast the flume's water is running past a rider doing `speed`, m/s. */
+export function flumeFlow(speed: number) {
+  return FILM_FLOW * Math.max(0, speed) + FILM_IDLE;
 }
 
 export function createRingMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
