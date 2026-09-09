@@ -12,6 +12,7 @@ import {
   vec2,
   vec4,
 } from "three/tsl";
+import { fieldCopy } from "./field-copy";
 import type { Node } from "three/webgpu";
 import type { RideSection } from "./generate";
 
@@ -86,6 +87,8 @@ const CHOP_GRIP = 0.07;
 /** Metres per cycle of that chop along the flume and across it. */
 const CHOP_ALONG = 7;
 const CHOP_ACROSS = 2.4;
+/** Fastest the sheet's surface is read as rising or falling, m/s. */
+const RISE_MAX = 8;
 
 function makeTarget(): THREE.RenderTarget {
   const rt = new THREE.RenderTarget(ALONG, ACROSS, {
@@ -104,6 +107,8 @@ function makeTarget(): THREE.RenderTarget {
 const targets = [makeTarget(), makeTarget()];
 let read = 0;
 const uPrev = texture(targets[1]!.texture);
+/** The half before the one the sheet is reading, for the rate the copy carries. */
+const uBefore = texture(targets[1]!.texture);
 
 /**
  * The flume's water, as the sheet material reads it: height in metres about the
@@ -126,6 +131,13 @@ export const SHEET_TEXEL_ACROSS = 1 / ACROSS;
 export type SheetField = {
   /** Point the rig at the flume the rider is in; the one it leaves goes back to its plane. */
   attach: (section: RideSection) => void;
+  /**
+   * What the water is doing at a point in the channel — `along` 0 to 1 down the
+   * flume, `lateral` -1 to 1 across it — read off the copy the game holds:
+   * metres about the plane the sheet levels to, how fast that is rising in m/s,
+   * and how broken it is, 0 to 1.
+   */
+  readAt: (along: number, lateral: number, out: THREE.Vector3) => THREE.Vector3;
   /**
    * Where the rider is in the flume: `along` 0 to 1 down the tube and negative
    * for nowhere, `lateral` -1 to 1 across the channel, half the channel's width
@@ -265,12 +277,17 @@ export function createSheetField(renderer: THREE.WebGPURenderer): SheetField {
     renderer.render(fieldScene, fieldCamera);
     renderer.setRenderTarget(outer);
     renderer.setMRT(outerMrt);
+    uBefore.value = targets[read]!.texture;
     read ^= 1;
     sheetField.value = targets[read]!.texture;
   };
 
   stepField(true);
   stepField(true);
+
+  // The sheet is drawn on the tube's own rings, so the copy is the field's own
+  // size: nothing along the flume is worth resolving finer than the water is.
+  const copy = fieldCopy(renderer, ALONG, ACROSS, sheetField, uBefore, CLAMP, STEP, RISE_MAX);
 
   let attached: RideSection | null = null;
   let priming = 0;
@@ -282,6 +299,7 @@ export function createSheetField(renderer: THREE.WebGPURenderer): SheetField {
       attached?.sheet.setField(0);
       attached = section;
       section.sheet.setField(1);
+      copy.clear();
       uSpan.value = section.sheet.span;
       uLapAlong.value = Math.min(
         LAP_ALONG_MAX,
@@ -309,6 +327,9 @@ export function createSheetField(renderer: THREE.WebGPURenderer): SheetField {
     setPoolLevel(metres) {
       uPool.value = THREE.MathUtils.clamp(metres, -CLAMP, CLAMP);
     },
+    readAt(along, lateral, out) {
+      return copy.at(along, lateral * 0.5 + 0.5, out);
+    },
     update(dt, elapsed) {
       if (!attached) return;
       uTime.value = elapsed;
@@ -322,8 +343,12 @@ export function createSheetField(renderer: THREE.WebGPURenderer): SheetField {
         steps++;
       }
       if (acc > STEP * 3) acc = 0;
+      // Only the flume the rider is in owes the game a copy; the one they have
+      // left is still running because its sheet is still drawn.
+      if (uRider.value.w > 0) copy.read();
     },
     dispose() {
+      copy.dispose();
       attached?.sheet.setField(0);
       attached = null;
       stepField(true);

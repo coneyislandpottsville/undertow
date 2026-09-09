@@ -74,11 +74,15 @@ Open:
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
-- The pool's field is 256 texels across 38 m, so the pool carries nothing shorter than
-  about 60 cm; below that the surface's own detail is a shading trick, not water
-  that moves. Its copy for the CPU is 128 texels of height and foam with one
-  request in flight, so nothing the game reads is finer than 30 cm or newer than
-  a frame or two, and the field's velocity is not in it.
+- Played at the refresh rate a fifty-second run drops a dozen frames past 20 ms,
+  in one stall of 250 to 340 ms per drop, mid-flume at full speed. The main
+  thread is not blocked through them, so it is the GPU or the driver: a pipeline
+  still being built as it is drawn. Main measures the same, so the warm-up is
+  landing on less than it looks like it is.
+- The pool's field is 256 texels across 38 m, so the pool carries nothing shorter
+  than about 60 cm; below that the surface's own detail is a shading trick, not
+  water that moves. Its copy for the CPU is 128 texels, so nothing the game reads
+  there is finer than 30 cm.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand.
 - The wall the water is seen through is three hand-rolled canvases: a streak, a
@@ -235,10 +239,26 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   catching up, so the game has its water before it can see it. With one water
   model left, `?ripples=analytic` and the ring wake it needed go with it.
 
-- Step 3: the flume's field, read back. The pool's field moves the rider; the
-  sheet's is seen and nothing else — the bow does not push, the chop does not
-  shake the seat, the audio does not know the water has gone white. The pool's
-  copy pass is the model, and its fourth channel is still free.
+- Step 3 (PR #43): the flume's field, read back. The pool's field moved the
+  rider; the sheet's was seen and nothing else. Both fields hand the game a copy
+  now, from one place (`src/game/field-copy.ts`): a pass packs the height across
+  two bytes with the foam and the rate it is changing at, and that byte target is
+  read back with one request in flight. The rate is taken between the two halves
+  of the ping-pong rather than off the field's velocity channel, because a field
+  holds as much as it integrates — a datum, a chute's chop, the crater under a
+  hull — and none of that is in the velocity. It is what the copy carries its own
+  age on: a read a frame or two old is handed back at the height it has risen to
+  since, which is the difference between a crown washing over the eye on time and
+  late.
+
+  What the flume's copy buys: the seat rides the sheet, measured against the
+  draft the rider settles to, so the crater they hold open under themselves is
+  where they float and the chute running over it is what lifts and drops them.
+  The water's tilt down the flume, taken over a baseline wider than that crater,
+  is a slope they run up or down at whatever apparent gravity is pressing them
+  into it — which at a crawl is their own bow standing ahead of them and at speed
+  is the wave they are trailing. And the hiss is the water they are in: a chute
+  running white is heard as well as seen.
 
 - Step 4: the wall the water is seen through. The sheet's whole body is
   `wallLook()`: the wall refracted by the ripples, absorbed by depth, and
