@@ -43,8 +43,12 @@ const shots = args.shots ?? "";
 /** name, route, query, kind */
 const CASES = [
   // The ride publishes the same window.__lab meter as the prototypes; ?gpu=1 turns its timestamp queries on.
+  // "ride" samples the tube at speed; "ride pool" rides on into the pool and samples
+  // there, where the funnel, the pool surface, and the spray are on screen.
   { name: "ride", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride", backend: "webgpu" },
   { name: "ride", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride", backend: "webgl" },
+  { name: "ride pool", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride-pool", backend: "webgpu" },
+  { name: "ride pool", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride-pool", backend: "webgl" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgpu", backend: "webgpu" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgl", backend: "webgl" },
   { name: "pool analytic", path: "/lab/pool", query: "backend=webgpu&sim=analytic", backend: "webgpu" },
@@ -135,13 +139,21 @@ for (const c of cases) {
     const row = { name: c.name, backend: c.backend, res: r.label, w: r.w, h: r.h, url };
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-      if (c.kind === "ride") {
+      if (c.kind === "ride" || c.kind === "ride-pool") {
         // Release the rider and hold W so the sample covers the tube at speed.
         await page.waitForFunction(() => Boolean(window.__controlsTest), null, { timeout: 30000 });
         await page.evaluate(() => {
           window.__controlsTest.release?.();
           window.__controlsTest.setKeys?.(["KeyW"]);
         });
+      }
+      if (c.kind === "ride-pool") {
+        // Ride on through the splash and the whirlpool, then let go: paddling
+        // about the pool is the steady state the pool surfaces are measured in.
+        await page.waitForFunction(() => window.__controlsTest.getMode?.() === "paddle", null, {
+          timeout: 120000,
+        });
+        await page.evaluate(() => window.__controlsTest.setKeys?.([]));
       }
       {
         await page.waitForFunction(

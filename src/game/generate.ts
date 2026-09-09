@@ -15,8 +15,6 @@ import {
   createTubeMaterial,
   createWallMaterial,
   createWaterMaterial,
-  createWhirlMaterial,
-  makeWhirlTexture,
   paletteAt,
   scrollCurrents,
   scrollTube,
@@ -45,7 +43,7 @@ export type RideSection = {
   pool: PoolData;
   exits: Exit[];
   group: THREE.Group;
-  whirl: THREE.Mesh;
+  /** Flat stand-in disc; the pool surface rig hides it for the pool it is in. */
   water: THREE.Mesh;
   /**
    * Animate this section's cues; call once per frame for the section the rider
@@ -60,12 +58,12 @@ type ExitVisual = { ring: THREE.Mesh; light: THREE.PointLight; phase: number };
 type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
 
 let nextId = 1;
-let whirlTex: THREE.CanvasTexture | null = null;
 
-function whirlTexture(): THREE.CanvasTexture {
-  if (!whirlTex) whirlTex = makeWhirlTexture();
-  return whirlTex;
-}
+/**
+ * Metres from the water line to the basin floor. Deep enough to hold the
+ * whirlpool funnel's throat (see FUNNEL_DEPTH in pool-surface.ts).
+ */
+const BASIN_DEPTH = 5.5;
 
 function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
   points.push(points[points.length - 1]!.clone().addScaledVector(dir, dist));
@@ -440,7 +438,7 @@ function assembleMeshes(
   pool: PoolData,
   exits: Exit[],
   palette: Palette,
-): Pick<RideSection, "group" | "whirl" | "water" | "tick" | "dispose"> {
+): Pick<RideSection, "group" | "water" | "tick" | "dispose"> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -460,11 +458,15 @@ function assembleMeshes(
 
   addRings(group, path, palette, geometries, materials);
 
-  const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, 5.4, 48, 1, true);
+  // The basin runs from the lip down past the throat of the whirlpool funnel,
+  // so the vortex never pokes through the floor and refraction has a closed
+  // bowl to look into rather than the void beyond an open-sided cylinder.
+  const wallHeight = BASIN_DEPTH + 4.3;
+  const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 48, 1, true);
   const wallMat = createWallMaterial(palette);
   const wall = new THREE.Mesh(wallGeo, wallMat);
   wall.position.copy(pool.center);
-  wall.position.y = pool.waterY + 1.6;
+  wall.position.y = pool.waterY + 4.3 - wallHeight / 2;
   group.add(wall);
   geometries.push(wallGeo);
   materials.push(wallMat);
@@ -488,23 +490,12 @@ function assembleMeshes(
   geometries.push(waterGeo);
   materials.push(waterMat);
 
-  const whirlGeo = new THREE.CircleGeometry(pool.radius * 0.72, 48);
-  const whirlMat = createWhirlMaterial(whirlTexture());
-  const whirl = new THREE.Mesh(whirlGeo, whirlMat);
-  whirl.rotation.x = -Math.PI / 2;
-  whirl.position.copy(pool.center);
-  whirl.position.y = pool.waterY + 0.04;
-  whirl.renderOrder = 2;
-  group.add(whirl);
-  geometries.push(whirlGeo);
-  materials.push(whirlMat);
-
   const floorGeo = new THREE.CircleGeometry(pool.radius + 1.2, 32);
   const floorMat = createWallMaterial(palette);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(pool.center);
-  floor.position.y = pool.waterY - 2.4;
+  floor.position.y = pool.waterY - BASIN_DEPTH;
   group.add(floor);
   geometries.push(floorGeo);
   materials.push(floorMat);
@@ -520,7 +511,6 @@ function assembleMeshes(
 
   return {
     group,
-    whirl,
     water,
     tick: (dt, elapsed, speed) => {
       scrollTube(tubeMat, dt, speed);
