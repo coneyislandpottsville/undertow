@@ -1,5 +1,7 @@
 import * as THREE from "three/webgpu";
 import {
+  Fn,
+  If,
   abs,
   attribute,
   cameraPosition,
@@ -412,6 +414,27 @@ function bumpNormal(height: Node<"float">, scale: number): Node<"vec3"> {
   return det.abs().mul(normalView).sub(grad).normalize();
 }
 
+/**
+ * Fractal noise over a plane, unrolled.
+ *
+ * Two-dimensional Perlin costs four gradients where three-dimensional costs
+ * eight, and the rock's fields are near-planar anyway: the wall's erosion moves
+ * a fraction of a period over its whole height, and the floor's does not move
+ * in y at all. What variation the third axis carried is sheared into the plane
+ * by the caller, which is a shift rather than a wash.
+ */
+function fbm(p: V2, octaves: number, lacunarity: number, diminish: number): Node<"float"> {
+  let sum = mx_noise_float(p);
+  let amp = 1;
+  let q = p;
+  for (let i = 1; i < octaves; i++) {
+    amp *= diminish;
+    q = q.mul(lacunarity);
+    sum = sum.add(mx_noise_float(q).mul(amp));
+  }
+  return sum;
+}
+
 export type BasinSurface = "wall" | "floor" | "rim";
 
 /**
@@ -437,13 +460,15 @@ export function createBasinMaterial(
   const submerged = smoothstep(-0.06, 0.5, depth);
   const wet = submerged.max(smoothstep(-1.5, -0.05, depth).mul(0.75));
 
-  const warp = mx_noise_float(vec3(p.x.mul(0.05), p.y.mul(0.02), p.z.mul(0.05)));
+  const warp = mx_noise_float(vec2(p.x.mul(0.05).add(p.y.mul(0.02)), p.z.mul(0.05)));
   const strata = flat
     ? float(0.5)
     : sin(p.y.mul(pool.bands).add(warp.mul(1.7))).mul(0.5).add(0.5);
-  const erosion = mx_fractal_noise_float(
-    flat ? vec3(p.x.mul(0.3), 3.7, p.z.mul(0.3)) : vec3(p.x.mul(0.8), p.y.mul(0.06), p.z.mul(0.8)),
-    3,
+  const erosion = fbm(
+    flat
+      ? vec2(p.x.mul(0.3).add(3.7), p.z.mul(0.3))
+      : vec2(p.x.mul(0.8).add(p.y.mul(0.06)), p.z.mul(0.8).add(p.y.mul(0.045))),
+    flat ? 2 : 3,
     2.1,
     0.55,
   )
@@ -474,26 +499,42 @@ export function createBasinMaterial(
 
   // Caustics as ridged noise: the filaments a wavy surface focuses light into,
   // drifting with the water. They climb the rock as well as sinking through it,
-  // because the surface throws light both ways.
+  // because the surface throws light both ways. Rock more than a couple of
+  // metres clear of the line is out of their reach, which is most of the wall,
+  // so the noise is behind that test rather than multiplied by nothing.
   const scale = flat ? 1.2 : 1.7;
   const t = uClock;
-  const drift = vec3(t.mul(0.42), t.mul(0.17), t.mul(-0.3));
-  const n = mx_fractal_noise_float(
-    vec3(p.x.mul(scale), p.y.mul(scale * 0.6), p.z.mul(scale)).add(drift),
-    2,
-    2.1,
-    0.5,
-  );
-  const filament = pow(abs(n).oneMinus().max(0), 8);
   const reach = smoothstep(2.4, 0, height).max(
     mix(float(1), float(0.4), smoothstep(0, 6, depth)).mul(submerged),
   );
-  // Light pools in the rock's hollows rather than lying flat across it.
-  const caustic = filament
-    .mul(reach)
-    .mul(erosion.mul(0.8).add(0.4))
-    .mul(warp.mul(0.4).add(0.7))
-    .mul(pool.caustic * (flat ? 1 : 0.4));
+  const caustic = Fn(() => {
+    const lit = float(0).toVar();
+    If(reach.greaterThan(0.002), () => {
+      // The floor is one height, so its noise is a plane already and the third
+      // axis buys it nothing. The wall climbs through twelve periods of it, and
+      // folding that into the plane would draw the filaments out into streaks.
+      const n = flat
+        ? fbm(vec2(p.x.mul(scale).add(t.mul(0.42)), p.z.mul(scale).sub(t.mul(0.3))), 2, 2.1, 0.5)
+        : mx_fractal_noise_float(
+            vec3(p.x.mul(scale), p.y.mul(scale * 0.6), p.z.mul(scale)).add(
+              vec3(t.mul(0.42), t.mul(0.17), t.mul(-0.3)),
+            ),
+            2,
+            2.1,
+            0.5,
+          );
+      const filament = pow(abs(n).oneMinus().max(0), 8);
+      // Light pools in the rock's hollows rather than lying flat across it.
+      lit.assign(
+        filament
+          .mul(reach)
+          .mul(erosion.mul(0.8).add(0.4))
+          .mul(warp.mul(0.4).add(0.7))
+          .mul(pool.caustic * (flat ? 1 : 0.4)),
+      );
+    });
+    return lit;
+  })();
   // The pool is the brightest thing in the basin; the rock around it catches
   // that light long before any lamp reaches it.
   const bounce = smoothstep(1.8, 0, height).mul(submerged.oneMinus()).mul(pool.bounce);

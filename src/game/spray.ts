@@ -23,6 +23,7 @@ import {
   vec4,
   viewportLinearDepth,
 } from "three/tsl";
+import { UNREFLECTED } from "./pool-surface";
 import type { Theme } from "./theme";
 
 /** Longest a droplet lives, s. Sets the scale of the life fade. */
@@ -302,6 +303,7 @@ export function createSpray(
   // After the pool surface and its strips: the water is alpha-tested, so
   // anything drawn before it inside the pool is painted over.
   spray.renderOrder = 4;
+  spray.layers.set(UNREFLECTED);
   scene.add(spray);
 
   // Mist: a few big, faint billboards that hang over a splash while it clears.
@@ -355,6 +357,7 @@ export function createSpray(
   mist.count = MIST;
   mist.frustumCulled = false;
   mist.renderOrder = 5;
+  mist.layers.set(UNREFLECTED);
   scene.add(mist);
 
   renderer.compute(init);

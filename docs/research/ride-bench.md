@@ -83,8 +83,33 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 5.5, the water moves (Step 5) | tube | webgl | 306 (3.0) | 193 (4.9) |
 | 5.5, the water moves (Step 5) | pool | webgpu | 139 (0.8) | 85 (0.8) |
 | 5.5, the water moves (Step 5) | pool | webgl | 140 (2.8) | 86 (7.6) |
+| 6.1, buying the budget back (Step 1) | tube | webgpu | 334 (0.5) | 205 (0.8) |
+| 6.1, buying the budget back (Step 1) | tube | webgl | 329 (2.8) | 205 (4.6) |
+| 6.1, buying the budget back (Step 1) | pool | webgpu | 164 (0.4) | 98 (0.5) |
+| 6.1, buying the budget back (Step 1) | pool | webgl | 179 (4.2) | 115 (0.2) |
 
 Notes:
+
+- Build 6 Step 1 buys the pool phase 1.6 ms a frame on WebGPU and 2.9 ms on the WebGL 2 tier,
+  taking it from 85 to 98 fps and from 86 to 115 at 3440x1440. Where the frame went, measured by
+  taking one thing out at a time at 3440x1440 on WebGPU against a 12.3 ms frame: the pool surface
+  and its reflection 5.4 ms, the basin 4.1 ms, the post stack 7.2 ms, the reflection alone 0.9 ms,
+  the spray 0.8 ms. They overlap, because most of them are the same pixels drawn into the same
+  targets.
+
+  The cuts: the basin's rock drops from seven noise evaluations a pixel to about three and a half.
+  Two-dimensional Perlin costs four gradients where three costs eight, and the wall's warp and
+  erosion move a fraction of a period over its whole height, so what the third axis carried is
+  sheared into the plane; the floor is one height, so its noise was a plane already. The caustics
+  keep their third axis on the wall, where twelve periods of it climb the rock and shearing drew
+  the filaments out into vertical streaks, and sit behind a test on whether the water reaches at
+  all, which most of the wall fails. The surface's own per-pixel detail and its foam grain lose
+  their third axis the same way, for five noise evaluations down to two and a half: a plane the
+  water drifts under rather than a volume it evolves in, which is also how water carries detail.
+  The zoom blur reads the frame once instead of ten times when it is not blurring, behind a branch
+  on its own uniform; the tap count has to stay constant inside it or the loop stops unrolling and
+  the tube phase pays 14 fps for it. The bloom builds from a third of the frame rather than a half.
+  The mirror stops drawing the spray, the mist and the cavern shell.
 
 - Build 4 step 5 costs one texture sample and about ten instructions on every tube and
   mouth pixel, which is inside run-to-run noise at these frame rates. The art is six
