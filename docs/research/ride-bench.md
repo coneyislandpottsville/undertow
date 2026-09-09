@@ -75,6 +75,10 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 5.3, the splash (Step 3) | tube | webgl | 330 (2.8) | 211 (4.6) |
 | 5.3, the splash (Step 3) | pool | webgpu | 148 (0.5) | 86 (0.9) |
 | 5.3, the splash (Step 3) | pool | webgl | 148 (8.1) | 90 (6.7) |
+| 5.4, the sheet in the tube (Step 4) | tube | webgpu | 323 (0.6) | 207 (1.0) |
+| 5.4, the sheet in the tube (Step 4) | tube | webgl | 302 (3.1) | 197 (4.9) |
+| 5.4, the sheet in the tube (Step 4) | pool | webgpu | 113 (1.4) | 87 (0.8) |
+| 5.4, the sheet in the tube (Step 4) | pool | webgl | 145 (6.1) | 89 (10.4) |
 
 Notes:
 
@@ -168,6 +172,12 @@ Notes:
 
 - Build 5 Step 3 costs about 0.1 ms: the splash is the same field pass with a shaped impulse and
   a schedule on the CPU, and the crown and column reuse the spray rig's spawn window.
+
+- Build 5 Step 4 costs the tube phase about 5 fps on WebGPU and 14 on the WebGL 2 tier: a second
+  transparent surface over the wall, with the flow-mapped ripple normal and two reads of the wall
+  look — one refracted through the water, one reflected off the far side of the tube. Its
+  geometry is the tube's own, cloned and displaced, and the tube went from 10 to 16 radial
+  segments so the waterline is not faceted.
 
 - Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
   twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution

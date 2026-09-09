@@ -84,6 +84,8 @@ export type Spray = {
     radial: THREE.Vector3,
     binormal: THREE.Vector3,
     speed: number,
+    /** How wide the rider ploughs the sheet, m: droplets leave along it. */
+    width: number,
   ) => void;
   /** Stop emitting from the tube; droplets already thrown finish their arc. */
   stopTube: () => void;
@@ -204,14 +206,19 @@ export function createSpray(
           );
           m.assign(vec4(cos(ang).mul(out), r3.mul(5).add(4.5), sin(ang).mul(out), 0));
         }).Else(() => {
-          // Tube: off the wall just ahead of the rider, then back past them.
+          // The tube: thrown off the line the rider ploughs through the sheet,
+          // just ahead of them and then back past them. Most of it comes off
+          // the two ends of that line, where the bow wave breaks, and it leaves
+          // sideways as well as up.
+          const side = r2.sub(0.5);
+          const across = side.mul(side).mul(4).mul(side.sign());
           const p = uOrigin
             .add(uTangent.mul(r1.mul(1.6).add(0.8)))
-            .add(uBinormal.mul(r2.sub(0.5).mul(1.0)));
+            .add(uBinormal.mul(across.mul(uSpread)));
           s.assign(vec4(p, r3.mul(0.5).add(0.35)));
           const along = uSpeed.mul(r1.mul(0.2).add(0.45));
-          const lift = r2.mul(2.6).add(1.4);
-          const drift = r3.sub(0.5).mul(3);
+          const lift = r2.mul(2.2).add(1.2);
+          const drift = across.mul(r3.mul(2.4).add(1.6)).add(r1.sub(0.5).mul(0.8));
           m.assign(
             vec4(uTangent.mul(along).sub(uRadial.mul(lift)).add(uBinormal.mul(drift)), 0),
           );
@@ -357,6 +364,7 @@ export function createSpray(
   /** Fractional droplets carried between frames so a slow rate still emits. */
   let carry = 0;
   let tubeSpeed = 0;
+  let tubeSpread = 1;
   let tubeOn = false;
   let burst = 0;
   let burstKind = 1;
@@ -369,9 +377,10 @@ export function createSpray(
   const rgbVec = new THREE.Vector3();
 
   return {
-    setTubeEmitter(position, tangent, radial: THREE.Vector3, binormal, speed) {
+    setTubeEmitter(position, tangent, radial: THREE.Vector3, binormal, speed, width) {
       tubeOn = speed > SPEED_FLOOR;
       tubeSpeed = speed;
+      tubeSpread = width;
       if (!tubeOn) return;
       uOrigin.value.copy(position);
       uTangent.value.copy(tangent);
@@ -443,6 +452,7 @@ export function createSpray(
         count = Math.min(Math.floor(carry), N);
         carry -= count;
         uKind.value = 0;
+        uSpread.value = tubeSpread;
       } else {
         carry = 0;
       }

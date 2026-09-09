@@ -13,6 +13,7 @@ import {
   createMouthMaterial,
   createBasinMaterial,
   createRingMaterial,
+  createSheetMaterial,
   createTubeMaterial,
   createWaterMaterial,
   scrollCurrents,
@@ -123,13 +124,17 @@ function addApparentDown(
 }
 
 /** The path's apparent-gravity direction at a distance along it. */
+function sampleAt(path: PathData, distance: number) {
+  const i = THREE.MathUtils.clamp(Math.round(distance / path.spacing), 0, path.samples.length - 1);
+  return path.samples[i]!;
+}
+
 function sampleApparentDown(path: PathData, distance: number): THREE.Vector3 {
-  const i = THREE.MathUtils.clamp(
-    Math.round(distance / path.spacing),
-    0,
-    path.samples.length - 1,
-  );
-  return path.samples[i]!.apparentDown;
+  return sampleAt(path, distance).apparentDown;
+}
+
+function sampleApparentG(path: PathData, distance: number): number {
+  return sampleAt(path, distance).apparentG;
 }
 /** Cruising slope band (unit-vector y). Every feature starts from inside it. */
 const CRUISE_MIN = -0.34;
@@ -533,6 +538,17 @@ function addMouth(
   geometries.push(geo);
   materials.push(mat);
 
+  // The same sheet the tube beyond it runs, so the water does not stop at the
+  // mouth and start again inside.
+  const sheetGeo = buildSheet(geo, radius, 12, theme, () => 1);
+  const sheetMat = createSheetMaterial(theme, 9, radius);
+  const sheetMesh = new THREE.Mesh(sheetGeo, sheetMat);
+  sheetMesh.frustumCulled = false;
+  sheetMesh.renderOrder = 2;
+  group.add(sheetMesh);
+  geometries.push(sheetGeo);
+  materials.push(sheetMat);
+
   const ringGeo = new THREE.TorusGeometry(radius + 0.3, 0.13, 8, 40);
   const ringMat = createExitRingMaterial(theme);
   const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -592,7 +608,7 @@ function assembleMeshes(
   const materials: THREE.Material[] = [];
   const exitVisuals: ExitVisual[] = [];
 
-  const RADIAL = 10;
+  const RADIAL = 16;
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, RADIAL, false);
   // The film's normal map and anisotropy need per-vertex tangents; the
@@ -611,6 +627,18 @@ function assembleMeshes(
   group.add(tube);
   geometries.push(tubeGeo);
   materials.push(tubeMat);
+
+  const sheetGeo = buildSheet(tubeGeo, path.radius, tubular, theme, (u) =>
+    sampleApparentG(path, u * path.length),
+  );
+  sheetGeo.setDrawRange(0, rings * RADIAL * 6);
+  const sheetMat = createSheetMaterial(theme, path.length, path.radius);
+  const sheet = new THREE.Mesh(sheetGeo, sheetMat);
+  sheet.frustumCulled = false;
+  sheet.renderOrder = 2;
+  group.add(sheet);
+  geometries.push(sheetGeo);
+  materials.push(sheetMat);
 
   addRings(group, path, stop, theme, geometries, materials);
   addSleeve(group, path, stop, pool, theme, geometries, materials);
@@ -680,6 +708,7 @@ function assembleMeshes(
     water,
     tick: (dt, elapsed, speed, whirl) => {
       scrollTube(tubeMat, dt, speed);
+      scrollTube(sheetMat, dt, speed);
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity =
@@ -698,6 +727,61 @@ function assembleMeshes(
       for (const m of materials) m.dispose();
     },
   };
+}
+
+/**
+ * How deep the sheet of water stands in the tube, as a share of the tube radius
+ * at rest and per extra g on top, capped: a flume runs more water where it
+ * presses harder, and the whole tube is never full.
+ */
+const SHEET_G_CAP = 3;
+
+/**
+ * The sheet of water the flume runs, built from the tube it runs in.
+ *
+ * The water levels off in each ring's own apparent gravity, so its surface is
+ * the plane at a fixed height along `-aDown`: every wall vertex below that
+ * plane moves up onto it, and the ones above stay on the wall with no water
+ * over them. `aDepth` records how much water each vertex ended up under, which
+ * is what the wall behind is absorbed by and where the leading edge is cut.
+ */
+function buildSheet(
+  tubeGeo: THREE.BufferGeometry,
+  radius: number,
+  tubular: number,
+  theme: Theme,
+  gAt: (u: number) => number,
+) {
+  const geo = tubeGeo.clone();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const nor = geo.attributes.normal as THREE.BufferAttribute;
+  const down = geo.attributes.aDown as THREE.BufferAttribute;
+  const count = pos.count;
+  const perRing = count / (tubular + 1);
+  const depth = new Float32Array(count);
+  const p = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    const g = THREE.MathUtils.clamp(gAt(Math.floor(i / perRing) / tubular), 0, SHEET_G_CAP);
+    const stand = radius * (theme.sheet.depth + theme.sheet.depthG * g);
+    p.fromBufferAttribute(pos, i);
+    n.fromBufferAttribute(nor, i);
+    up.fromBufferAttribute(down, i).negate();
+    // The surface is the plane `stand` metres up from the lowest point of the
+    // ring, so a vertex on the wall rises to it by whatever it is short.
+    const lift = stand - radius - radius * n.dot(up);
+    if (lift > 0) {
+      p.addScaledVector(up, lift);
+      pos.setXYZ(i, p.x, p.y, p.z);
+      nor.setXYZ(i, up.x, up.y, up.z);
+      depth[i] = lift;
+    }
+  }
+  pos.needsUpdate = true;
+  nor.needsUpdate = true;
+  geo.setAttribute("aDepth", new THREE.BufferAttribute(depth, 1));
+  return geo;
 }
 
 const MOUTH_CLEARANCE = 16;

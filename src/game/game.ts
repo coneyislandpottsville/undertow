@@ -1266,8 +1266,23 @@ export class Game {
     if (!spray) return;
     this.riderLight.getWorldPosition(_riderLight);
     if (this.mode === "slide" && this.released) {
-      _tmp.copy(_frame.position).addScaledVector(this.radial, this.current.path.radius - 0.12);
-      spray.setTubeEmitter(_tmp, _frame.tangent, this.radial, _frame.binormal, this.speed);
+      // The emitter sits on the sheet, not the wall, and is as wide as the
+      // rider's line through it: the chord the water is cut along.
+      const sheet = this.current.theme.sheet;
+      const radius = this.current.path.radius;
+      const depth =
+        radius *
+        (sheet.depth +
+          sheet.depthG * THREE.MathUtils.clamp(Math.abs(this.press) / GRAVITY, 0, 3));
+      _tmp.copy(_frame.position).addScaledVector(this.radial, radius - depth);
+      spray.setTubeEmitter(
+        _tmp,
+        _frame.tangent,
+        this.radial,
+        _frame.binormal,
+        this.speed,
+        Math.sqrt(2 * radius * depth),
+      );
     } else {
       spray.stopTube();
     }
