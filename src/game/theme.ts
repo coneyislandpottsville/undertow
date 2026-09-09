@@ -45,6 +45,23 @@ export type Theme = {
     ringGlow: number;
   };
 
+  /** The sheet of water the flume runs, as a body with a surface of its own. */
+  sheet: {
+    /** How deep it stands at rest and at every extra g, as a share of the tube radius. */
+    depth: number;
+    depthG: number;
+    /** Absorption per metre of water the eye looks through, and what it scatters back. */
+    absorb: number;
+    scatter: number;
+    /** How far the ripples bend the wall behind it, per metre of depth. */
+    refract: number;
+    /** Metres of depth the leading edge foams over, and how brightly. */
+    edge: number;
+    foam: number;
+    /** The rider lamp's glitter path on the ripples. */
+    glint: number;
+  };
+
   pool: {
     wallRough: number;
     wallMetal: number;
@@ -143,6 +160,17 @@ const FILM: Theme["film"] = {
   ringGlow: 0.18,
 };
 
+const SHEET: Theme["sheet"] = {
+  depth: 0.1,
+  depthG: 0.05,
+  absorb: 1.1,
+  scatter: 0.55,
+  refract: 1.6,
+  edge: 0.09,
+  foam: 0.3,
+  glint: 0.9,
+};
+
 const POOL: Theme["pool"] = {
   wallRough: 0.82,
   wallMetal: 0.04,
@@ -212,6 +240,7 @@ export const THEMES: readonly Theme[] = [
     fog: 0x0a2026,
     ring: 0xd6f2ea,
     film: FILM,
+    sheet: SHEET,
     pool: POOL,
     screen: SCREEN,
     exit: EXIT,
@@ -231,6 +260,7 @@ export const THEMES: readonly Theme[] = [
     fog: 0x03080f,
     ring: 0x9fd8ff,
     film: { ...FILM, dry: 0.55, wet: 0.08, tint: 0.45, ringGlow: 0.3 },
+    sheet: SHEET,
     pool: {
       ...POOL,
       bands: 1.4,
@@ -290,6 +320,7 @@ export const THEMES: readonly Theme[] = [
     fog: 0x0a1a10,
     ring: 0xd8ecb0,
     film: { ...FILM, dry: 0.62, wet: 0.16, normalWet: 0.85, tint: 0.5 },
+    sheet: SHEET,
     pool: {
       ...POOL,
       bands: 1.1,
@@ -349,6 +380,7 @@ export const THEMES: readonly Theme[] = [
     fog: 0x140704,
     ring: 0xffcf9a,
     film: { ...FILM, dry: 0.45, tint: 0.4, glow: 0.06 },
+    sheet: SHEET,
     pool: {
       ...POOL,
       wallGlow: 0.42,
@@ -417,6 +449,7 @@ export const THEMES: readonly Theme[] = [
       streak: 0.6,
       metalness: 0.02,
     },
+    sheet: SHEET,
     pool: {
       ...POOL,
       wallRough: 0.35,
@@ -488,6 +521,7 @@ export const THEMES: readonly Theme[] = [
       glow: 0.1,
       ringGlow: 0.5,
     },
+    sheet: SHEET,
     pool: {
       ...POOL,
       wallRough: 0.4,

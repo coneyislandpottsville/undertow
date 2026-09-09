@@ -90,7 +90,6 @@ Open:
 - A rider parked against the pool wall sees rock at point-blank range, which is
   a featureless wash: the basin needs near-field detail or the paddle clamp
   needs to hold them further off it.
-- The tube's film is a shading trick on a dry wall: no body, no leading edge.
 - Nothing in the pool flows; the current toward the mouths is painted dashes.
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
@@ -233,6 +232,17 @@ not. Hold 60 fps at 3440×1440 with MSAA on.
   a point, and the impact aerates the water it displaces, so the churn outlasts
   the splash. Also: the water the floatie sits in is damped as well as sprung,
   or the dish drives itself to the clamp.
+
+- Step 4 (PR #23): the sheet in the tube. The film was a shading trick on a dry
+  wall; there is now a body of water in the flume. Its geometry is the tube's
+  own, cloned and displaced onto the plane the water levels at in each ring's
+  apparent gravity — so it stands deeper where that gravity presses harder,
+  rides up the outside of a turn, and has a leading edge where it runs out
+  against the wall. Through it the wall is refracted and absorbed by how much
+  water is over it; at grazing angles it reflects the far side of the tube,
+  which is what makes the panels ripple down it. `aDepth` per vertex is what
+  cuts the edge and thins the water. Droplets now leave along the line the
+  rider ploughs, mostly off its two ends, and sideways as well as up.
 
 ### 6. Mobile (parked)
 

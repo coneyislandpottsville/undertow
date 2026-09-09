@@ -5,7 +5,9 @@ import {
   cameraPosition,
   color,
   dot,
+  cross,
   emissive,
+  exp,
   faceDirection,
   float,
   fract,
@@ -19,6 +21,7 @@ import {
   mx_noise_float,
   normalLocal,
   normalMap,
+  normalize,
   normalView,
   output,
   positionView,
@@ -32,6 +35,7 @@ import {
   uv,
   vec2,
   vec3,
+  vec4,
   vertexStage,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
@@ -74,6 +78,8 @@ const FILM_CYCLE = 8;
 const RIPPLE_TILE = 2;
 /** Streak tile length along the tube, m. */
 const STREAK_TILE = 5;
+/** How much further a reflection swings with the ripples than a refraction. */
+const REFLECT_BEND = 5;
 
 /** Per-material flow distance, m, advanced by scrollTube(). */
 const flows = new WeakMap<THREE.Material, { value: number }>();
@@ -142,6 +148,57 @@ function tubeTextures() {
 }
 
 /**
+ * The two-scale flow-mapped ripple normal, in tangent space. Each layer scrolls
+ * FILM_CYCLE metres and hands over to its twin half a cycle out of phase, so
+ * the flow never restarts visibly.
+ */
+function flowNormal(uvNode: V2, flowDist: Node<"float">, length: number, radius: number): V3 {
+  const { ripple } = tubeTextures();
+  const aroundTiles = Math.max(1, Math.round((Math.PI * 2 * radius) / RIPPLE_TILE));
+  const base = vec2(uvNode.x.mul(length / RIPPLE_TILE), uvNode.y.mul(aroundTiles));
+  const phase1 = fract(flowDist.div(FILM_CYCLE));
+  const phase2 = fract(phase1.add(0.5));
+  const blend = abs(phase1.mul(2).sub(1));
+  const flowSample = (node: V2, tilesPerCycle: number): V3 => {
+    const n1 = texture(ripple, node.sub(vec2(phase1.mul(tilesPerCycle), 0))).xyz;
+    const n2 = texture(ripple, node.sub(vec2(phase2.mul(tilesPerCycle), 0))).xyz;
+    return mix(n1, n2, blend).mul(2).sub(1);
+  };
+  const tiles = FILM_CYCLE / RIPPLE_TILE;
+  return flowSample(base, tiles)
+    .add(flowSample(base.mul(vec2(2.3, 2)), tiles * 1.3 * 2.3))
+    .normalize();
+}
+
+/**
+ * What the tube wall carries: its streak map in the theme's tube colour, and
+ * the lit panel of art every `pitch` metres, drifting along it. Both the wall
+ * and the sheet of water over it read this, so the art runs on under the water
+ * rather than stopping at its edge.
+ */
+function wallLook(theme: Theme, uvNode: V2, length: number) {
+  const { streak } = tubeTextures();
+  const wall = texture(
+    streak,
+    vec2(uvNode.x.mul(length / STREAK_TILE), uvNode.y.mul(2)),
+  ).rgb.mul(color(theme.tube));
+
+  const screen = theme.screen;
+  const along = uvNode.x.mul(length / screen.pitch).sub(uClock.mul(screen.drift / screen.pitch));
+  const cell = fract(along);
+  const edge = (1 - screen.fill) * 0.5;
+  const band = smoothstep(edge, edge + 0.05, cell).mul(
+    smoothstep(1 - edge - 0.05, 1 - edge, cell).oneMinus(),
+  );
+  const art = texture(
+    screenTexture(screen.art),
+    vec2(uvNode.y.mul(screen.wrap), cell.sub(edge).div(screen.fill).clamp(0, 1)),
+  );
+  const panel = art.rgb.mul(art.a).mul(color(screen.tint)).mul(band.mul(screen.strength));
+  return { wall, panel };
+}
+
+/**
  * Tube interior: the wall's streak map seen through a thin water film.
  * Wetness comes from the geometric normal (the floor faces down), so the lower
  * wall carries flow-mapped ripple normals at two scales, roughness drops from
@@ -158,7 +215,6 @@ export function createTubeMaterial(
    *  glow gives way at point-blank range. */
   mouth = false,
 ): THREE.MeshPhysicalNodeMaterial {
-  const { streak, ripple } = tubeTextures();
   const film = theme.film;
   const uFlow = uniform(0);
   const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
@@ -172,49 +228,15 @@ export function createTubeMaterial(
   const down = vertexStage(transformDirection(attribute("aDown", "vec3"), modelWorldMatrix));
   const wet = smoothstep(-0.15, 0.85, dot(worldNormal, down));
 
-  // u runs along the tube, v around it. A whole number of ripple tiles around
-  // the tube keeps the v seam invisible; layer B doubles that and stretches
-  // along the flow so the two never line up.
-  const aroundTiles = Math.max(1, Math.round((Math.PI * 2 * radius) / RIPPLE_TILE));
-  const base = vec2(uv().x.mul(length / RIPPLE_TILE), uv().y.mul(aroundTiles));
-  const phase1 = fract(flowDist.div(FILM_CYCLE));
-  const phase2 = fract(phase1.add(0.5));
-  const blend = abs(phase1.mul(2).sub(1));
-  const flowSample = (uvNode: V2, tilesPerCycle: number): V3 => {
-    const n1 = texture(ripple, uvNode.sub(vec2(phase1.mul(tilesPerCycle), 0))).xyz;
-    const n2 = texture(ripple, uvNode.sub(vec2(phase2.mul(tilesPerCycle), 0))).xyz;
-    return mix(n1, n2, blend).mul(2).sub(1);
-  };
-  const tiles = FILM_CYCLE / RIPPLE_TILE;
-  const tnA = flowSample(base, tiles);
-  const tnB = flowSample(base.mul(vec2(2.3, 2)), tiles * 1.3 * 2.3);
-  const tn = tnA.add(tnB).normalize();
-
-  // Wall seen through the film: the streak map sampled with a normal-driven offset.
-  const wallUV = vec2(uv().x.mul(length / STREAK_TILE), uv().y.mul(2)).add(tn.xy.mul(0.06).mul(wet));
-  const wallColor = texture(streak, wallUV).rgb.mul(color(theme.tube));
+  const tn = flowNormal(uv(), flowDist, length, radius);
+  // Wall seen through the film: the map sampled with a normal-driven offset.
+  const look = wallLook(theme, uv().add(tn.xy.mul(0.02).mul(wet)), length);
+  const wallColor = look.wall;
   const filmTint = mix(vec3(1), color(theme.water).mul(1.3), wet.mul(film.tint));
-
-  // The interior is a screen: a lit panel of wall every `pitch` metres carrying
-  // the theme's art, drifting along the tube. The film runs over it, so a panel
-  // shows where the wall is dry and gives way where the water sheets.
+  // The sheet of water carries the panel below its own edge, so the wall only
+  // shows one where it is not under water.
+  const panel = look.panel.mul(wet.oneMinus());
   const screen = theme.screen;
-  const along = uv()
-    .x.mul(length / screen.pitch)
-    .sub(uClock.mul(screen.drift / screen.pitch));
-  const cell = fract(along);
-  const edge = (1 - screen.fill) * 0.5;
-  const band = smoothstep(edge, edge + 0.05, cell).mul(
-    smoothstep(1 - edge - 0.05, 1 - edge, cell).oneMinus(),
-  );
-  const art = texture(
-    screenTexture(screen.art),
-    vec2(uv().y.mul(screen.wrap), cell.sub(edge).div(screen.fill).clamp(0, 1)),
-  );
-  const panel = art.rgb
-    .mul(art.a)
-    .mul(color(screen.tint))
-    .mul(band.mul(wet.oneMinus()).mul(screen.strength));
 
   const mat = new THREE.MeshPhysicalNodeMaterial({
     side: THREE.BackSide,
@@ -232,6 +254,90 @@ export function createTubeMaterial(
   mat.roughnessNode = mix(float(film.dry), float(film.wet), wet);
   mat.anisotropyNode = vec2(wet.mul(film.streak).add(0.001), 0.001);
   mat.anisotropy = 1;
+  flows.set(mat, uFlow);
+  return mat;
+}
+
+/**
+ * The sheet of water the flume runs, as a surface of its own.
+ *
+ * The geometry is the tube's, displaced onto the plane the water levels at in
+ * each ring's own apparent gravity, so it has a leading edge where it runs out
+ * against the wall and a body between there and the wall. `aDepth` is how much
+ * water is under each vertex, which is what the wall behind it is absorbed by
+ * and what the edge is cut on.
+ */
+export function createSheetMaterial(
+  theme: Theme,
+  length: number,
+  radius: number,
+): THREE.MeshBasicNodeMaterial {
+  const sheet = theme.sheet;
+  const uFlow = uniform(0);
+  const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
+  // @types/three types a named attribute as Node<string>; the shader knows it
+  // is the float the geometry writes.
+  const depth = attribute("aDepth", "float") as unknown as Node<"float">;
+
+  const ripple = flowNormal(uv(), flowDist, length, radius);
+  // The wall through the water, pushed about by the ripples: the deeper the
+  // sheet, the further the eye is bent before it reaches the wall. The uv is
+  // the tube's, so the two axes are metres apart in scale and the bend is
+  // written in metres and divided back.
+  const around = Math.PI * 2 * radius;
+  const bend = vec2(ripple.x.div(length), ripple.y.div(around)).mul(sheet.refract).mul(depth);
+  const look = wallLook(theme, uv().add(bend), length);
+  const tint = new THREE.Color(theme.water);
+  const water: V3 = vec3(tint.r, tint.g, tint.b);
+  const absorb = exp(depth.mul(sheet.absorb).mul(water.oneMinus()).negate());
+  const lit = look.wall.add(look.panel);
+  const body = lit.mul(absorb).add(water.mul(absorb.oneMinus()).mul(sheet.scatter));
+
+  // Its own surface: the tube caught at grazing angles, the ripples glinting,
+  // and a crest of foam where it runs out against the wall. The ripples go in
+  // through the geometry's own tangent frame, which runs along the tube, so
+  // they streak with the flow rather than across it.
+  const flat = normalize(transformDirection(normalLocal, modelWorldMatrix));
+  const tangent = attribute("tangent", "vec4") as unknown as Node<"vec4">;
+  const along = normalize(transformDirection(tangent.xyz, modelWorldMatrix));
+  const across = normalize(cross(flat, along));
+  const surfaceNormal = normalize(
+    flat.mul(ripple.z).add(along.mul(ripple.x)).add(across.mul(ripple.y)),
+  );
+  const view = normalize(cameraPosition.sub(positionWorld));
+  const fresnel = pow(dot(view, surfaceNormal).abs().oneMinus(), 4).mul(0.7).add(0.03);
+  // Down the tube the sheet is edge-on, so most of what it shows is what it
+  // reflects, and there is no sky in a tube: what it reflects is the far side
+  // of it. Half a turn round in v is that side, and a reflection at a grazing
+  // angle swings far further with the ripples than a refraction does.
+  const far = wallLook(
+    theme,
+    uv().add(vec2(0, 0.5)).add(bend.mul(REFLECT_BEND)),
+    length,
+  );
+  const mirrored = far.wall.mul(0.6).add(far.panel.mul(1.4));
+  // The rider's lamp is at the eye, so the highlight is retroreflective: the
+  // ripples that happen to face the camera light up and the rest do not, which
+  // is the glitter path a torch throws down running water.
+  const glint = pow(dot(surfaceNormal, view).max(0), 8).mul(sheet.glint);
+  const crest = smoothstep(sheet.edge, 0, depth).mul(smoothstep(0, sheet.edge * 0.3, depth));
+  const foam = crest.mul(sheet.foam).mul(ripple.z.mul(0.5).add(0.6));
+
+  const mat = new THREE.MeshBasicNodeMaterial({
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const glow = look.panel.mul(theme.screen.glow).mul(absorb);
+  mat.colorNode = mix(body, mirrored, fresnel)
+    .add(color(theme.ring).mul(glint))
+    .add(color(theme.ring).mul(foam));
+  mat.opacityNode = smoothstep(0, 0.02, depth);
+  mat.alphaTest = 0.5;
+  mat.mrtNode = mrt({
+    ...colorTargets(output),
+    emissive: vec4(glow.add(color(theme.ring).mul(foam.mul(0.6).add(glint.mul(0.5)))), 1),
+  });
   flows.set(mat, uFlow);
   return mat;
 }

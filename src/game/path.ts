@@ -17,6 +17,8 @@ export type PathSample = {
    * the outer wall, not at the ground.
    */
   apparentDown: THREE.Vector3;
+  /** How hard it presses, in g. Weightless at a hump crest, three through a fast turn. */
+  apparentG: number;
 };
 
 export type PathData = {
@@ -107,6 +109,7 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
       quat,
       distance: i * actualSpacing,
       apparentDown: new THREE.Vector3(0, -1, 0),
+      apparentG: 1,
     });
   }
 
@@ -124,6 +127,7 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
  */
 function applyApparentGravity(samples: PathSample[], spacing: number) {
   const raw: THREE.Vector3[] = [];
+  const mags: number[] = [];
   const g = new THREE.Vector3();
   let v = ENTRY_SPEED;
   for (const sample of samples) {
@@ -135,19 +139,25 @@ function applyApparentGravity(samples: PathSample[], spacing: number) {
     // fall back to plain down rather than normalising something near zero.
     g.set(0, -GRAVITY, 0).addScaledVector(sample.curvature, -(v * v));
     const mag = g.length();
+    mags.push(mag / GRAVITY);
     raw.push(mag > 1 ? g.clone().divideScalar(mag) : new THREE.Vector3(0, -1, 0));
   }
   // The same short box filter the curvature gets, so the band slides around the
   // tube through a loop instead of snapping across it.
   for (let i = 0; i < samples.length; i++) {
     const acc = new THREE.Vector3();
+    let press = 0;
+    let taken = 0;
     for (let k = -3; k <= 3; k++) {
       const j = i + k;
       if (j < 0 || j >= raw.length) continue;
       acc.add(raw[j]!);
+      press += mags[j]!;
+      taken++;
     }
     if (acc.lengthSq() < 1e-6) acc.set(0, -1, 0);
     samples[i]!.apparentDown = acc.normalize();
+    samples[i]!.apparentG = press / Math.max(1, taken);
   }
 }
 
