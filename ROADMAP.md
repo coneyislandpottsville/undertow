@@ -87,6 +87,10 @@ Phase 3 is complete.
 
 Open:
 
+- Foam exists only on the funnel, and blows out to white in the near field.
+- The splash is one impulse, a burst of droplets and eight raining drops.
+- The tube's film is a shading trick on a dry wall: no body, no leading edge.
+- Nothing in the pool flows; the current toward the mouths is painted dashes.
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
 - The pool phase costs 10.5 ms of a 16.7 ms budget at 3440x1440. The basin's
@@ -189,11 +193,28 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
   field. Knobs: `?ripples=`, `?reflect=`, `?refract=`, `?spray=`, `?post=0`,
   `?theme=`, `?screen=`, `?fade=`.
 
-### 5. Mobile (next)
+### 5. The water (Build 5, in progress)
+
+The one goal until it is right: the water. Numbers per step in
+`docs/research/ride-bench.md`; every step lands on both tiers or writes down why
+not. Hold 60 fps at 3440×1440 with MSAA on.
+
+- Step 1 (PR #20): under the surface. The splash drives the rider under and
+  buoyancy bobs them back; the water line the game tests against is the surface
+  the rider can see, funnel and waves together, from one set of numbers shared
+  with the shader. Under it the surface is a ceiling — a mirror of the water
+  body outside the critical angle, the world above squeezed through Snell's
+  window inside it — the scene fog becomes the body of water so absorption is
+  free for every surface, the rider's lamp gives up half its reach, the frame
+  wobbles and closes in, the mix drops through a lowpass, and the rig throws
+  bubbles that rise and burst at the line. The surface also stops being cut at
+  the wall, which showed as a hard edge whenever the swell was up.
+
+### 6. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
 
-### 6. Framing
+### 7. Framing
 
 - Attract mode, seed sharing, share card.
 

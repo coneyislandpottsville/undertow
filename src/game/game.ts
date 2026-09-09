@@ -49,6 +49,25 @@ const WHIRL_INNER = 3.2;
 const WHIRL_LEAN = 3.2;
 /** Seconds the world takes to become the next section's theme; `?fade=` overrides. */
 const THEME_FADE = 1.2;
+/**
+ * The rider bobbing back up after being driven under, as a spring: stiffness
+ * and damping per second². Under-damped, so the splash carries them down and
+ * they surface with a bob rather than rising to rest.
+ */
+const PLUNGE_K = 14;
+const PLUNGE_C = 2.6;
+/** Downward speed the splash drives into that spring, m/s: never less, never more. */
+const PLUNGE_MIN = 7;
+const PLUNGE_MAX = 12;
+/** Metres of water the frame takes to change from air to under it. */
+const CROSS_BAND = 0.12;
+/** Degrees of vertical FOV given up under water. */
+const UNDER_FOV = 6;
+/** Bubbles a second at the head of the plume torn under at a splash, and how long it lasts. */
+const PLUNGE_BUBBLES = 6000;
+const PLUME_TIME = 1.1;
+/** Bubbles a second off the rider while they are under. */
+const WAKE_BUBBLES = 1400;
 
 function makeFrame() {
   return {
@@ -79,6 +98,9 @@ const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
 const _themeColor = new THREE.Color();
+const _under = new THREE.Vector3();
+const _bubbleAt = new THREE.Vector3();
+const _white = new THREE.Vector3(1, 1, 1);
 
 /** One step of a light toward a theme's colour and intensity; `t` of 1 snaps. */
 function easeLight(light: THREE.Light, hex: number, intensity: number, t: number) {
@@ -179,12 +201,31 @@ export class Game {
   private hudTick = 0;
   private focused = false;
   private running = false;
+  /** Holds the last frame on the canvas so a capture can be aimed at a moment. */
+  private paused = false;
   private raf = 0;
   private disposed = false;
   private whirlWall = 0;
   /** Counts down after a splash, ringing the height field as droplets land. */
   private dropTimer = -1;
   private splashRain = 0;
+  /** Metres the seat is held below where it floats; a splash drives it, buoyancy returns it. */
+  private plunge = 0;
+  private plungeVel = 0;
+  /** 0 in air, 1 under the water line. */
+  private submerged = 0;
+  private wasUnder = false;
+  /** Seconds of bubble plume left from going under. */
+  private bubbleTime = 0;
+  /**
+   * The theme's atmosphere in air and inside the body of water. The scene fog
+   * is mixed between the two, so absorption under water is the fog every
+   * surface already reads rather than a second mechanism.
+   */
+  private readonly airFog = { color: new THREE.Color(0x07181c), density: 0.012 };
+  private readonly waterFog = { color: new THREE.Color(0x0a4048), density: 0.1 };
+  /** The rider lamp's reach in air; water takes some of it back. */
+  private lampRange = 28;
   /** False until the first click: the rider waits at the tube mouth. */
   private released = false;
   private readonly onResize = () => this.resize();
@@ -320,6 +361,10 @@ export class Game {
       getLift: () => this.lift,
       getPress: () => this.press,
       getWhirl: () => ({ energy: this.whirlEnergy, r: this.whirlR }),
+      getSubmerged: () => this.submerged,
+      pause: (on) => {
+        this.paused = on;
+      },
       getPosition: () => [this.px, this.py, this.pz],
       getSeed: () => this.worldSeed.toString(16),
       getTheme: () => this.current.theme.id,
@@ -441,7 +486,8 @@ export class Game {
     const aspect = this.camera.aspect || 1;
     const hFov = aspect >= 2.1 ? 110 : aspect >= 1.8 ? 102 : aspect >= 1.5 ? 94 : 88;
     const speedKick = (Math.abs(this.speed) / MAX_SPEED) * (this.reducedMotion ? 2 : 10);
-    this.camera.fov = vFovFromHorizontal(hFov, aspect) + speedKick + this.fovPunch;
+    this.camera.fov =
+      vFovFromHorizontal(hFov, aspect) + speedKick + this.fovPunch - this.submerged * UNDER_FOV;
     this.camera.updateProjectionMatrix();
   }
 
@@ -451,12 +497,23 @@ export class Game {
    * section owns carry the theme they were built with.
    */
   private applyTheme(theme: Theme, t: number) {
-    const fog = this.scene.fog as THREE.FogExp2;
     _themeColor.set(theme.fog);
-    fog.color.lerp(_themeColor, t);
-    fog.density += (theme.fogDensity - fog.density) * t;
-    (this.scene.background as THREE.Color).copy(fog.color);
-    this.renderer.setClearColor(fog.color, 1);
+    this.airFog.color.lerp(_themeColor, t);
+    this.airFog.density += (theme.fogDensity - this.airFog.density) * t;
+    _themeColor.set(theme.water).multiplyScalar(theme.pool.underShade);
+    this.waterFog.color.lerp(_themeColor, t);
+    this.waterFog.density += (theme.pool.under - this.waterFog.density) * t;
+    if (this.post) {
+      // The cast the water puts on the whole frame is its hue at full strength,
+      // not its brightness: the fog is what darkens.
+      _themeColor.set(theme.water);
+      const peak = Math.max(_themeColor.r, _themeColor.g, _themeColor.b, 1e-3);
+      _under
+        .set(_themeColor.r, _themeColor.g, _themeColor.b)
+        .divideScalar(peak)
+        .lerp(_white, 0.3);
+      this.post.underColor.value.lerp(_under, t);
+    }
 
     const light = theme.light;
     easeLight(this.hemi, light.sky, light.hemi, t);
@@ -465,7 +522,7 @@ export class Game {
     easeLight(this.sun, light.sun, light.sunIntensity, t);
     easeLight(this.ambient, light.ambient, light.ambientIntensity, t);
     easeLight(this.riderLight, light.lamp, light.lampIntensity, t);
-    this.riderLight.distance += (light.lampRange - this.riderLight.distance) * t;
+    this.lampRange += (light.lampRange - this.lampRange) * t;
 
     if (this.post) {
       const bloom = this.post.bloom;
@@ -496,10 +553,79 @@ export class Game {
     this.applyTheme(target, (eased - from) / (1 - from));
   }
 
+  /**
+   * Compose the two atmospheres over how far under the water the camera is.
+   * Everything that reads the scene fog — the basin, the tube, the surface
+   * itself, the spray — is absorbed by the body of water for free; the post
+   * stack adds what the eye does, and the lamp gives up half its reach.
+   */
+  private applyWaterGrade() {
+    const u = this.submerged;
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(this.airFog.color).lerp(this.waterFog.color, u);
+    fog.density = this.airFog.density + (this.waterFog.density - this.airFog.density) * u;
+    (this.scene.background as THREE.Color).copy(fog.color);
+    this.renderer.setClearColor(fog.color, 1);
+    this.riderLight.distance = this.lampRange * (1 - 0.5 * u);
+    if (this.post) this.post.under.value = u;
+  }
+
+  /**
+   * How far the camera is under the water it is over, and what that crossing
+   * sets off. The water line is the surface the rider can see, funnel and waves
+   * together, so a swell washing over the eye counts as going under.
+   */
+  private updateSubmersion(dt: number) {
+    const surface = this.poolSurface;
+    const pool = this.current.pool;
+    const cam = this.camera.position;
+    const dx = cam.x - pool.center.x;
+    const dz = cam.z - pool.center.z;
+    const reach = pool.radius + 1;
+    let target = 0;
+    let line = pool.waterY;
+    if (surface && dx * dx + dz * dz < reach * reach) {
+      const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
+      line = surface.waterLineAt(cam.x, cam.z, e, this.clock.elapsed);
+      target = THREE.MathUtils.clamp((line - cam.y) / CROSS_BAND, 0, 1);
+    }
+    this.submerged = expDamp(this.submerged, target, 18, dt);
+    const under = this.submerged > 0.5;
+    if (under !== this.wasUnder) {
+      this.wasUnder = under;
+      if (under) {
+        this.audio.plunge();
+        surface?.impulse(cam.x, cam.z, 1, 0.2);
+        this.bubbleTime = Math.max(this.bubbleTime, PLUME_TIME * 0.45);
+      } else {
+        this.audio.breach();
+        surface?.impulse(cam.x, cam.z, 0.8, 0.14);
+        _tmp.set(cam.x, line, cam.z);
+        this.spray?.splash(_tmp, 0.14);
+      }
+    }
+    this.audio.setSubmerged(this.submerged);
+    surface?.setUnder(under);
+    this.spray?.setWaterLine(line);
+    // Air comes down with the rider and is dragged along by them, so the plume
+    // is emitted where they are rather than where they went in: at this speed
+    // an anchored column is behind them within a few frames.
+    this.bubbleTime = Math.max(0, this.bubbleTime - dt);
+    const rate = PLUNGE_BUBBLES * (this.bubbleTime / PLUME_TIME) + (under ? WAKE_BUBBLES : 0);
+    if (rate > 0) {
+      this.camera.getWorldDirection(_tmp);
+      _bubbleAt.copy(cam).addScaledVector(_tmp, 1.7);
+      _bubbleAt.y = Math.min(_bubbleAt.y, line) - 0.6;
+      this.spray?.bubbles(_bubbleAt, 2.4, Math.round(rate * dt));
+    }
+    this.applyWaterGrade();
+  }
+
   private tick() {
     const now = performance.now();
     let dt = (now - this.clock.prev) / 1000;
     this.clock.prev = now;
+    if (this.paused) return;
     dt = Math.min(dt, 0.1);
     this.clock.elapsed += dt;
     this.clock.acc += dt;
@@ -616,6 +742,16 @@ export class Game {
     this.press = into;
   }
 
+  /**
+   * The rider as a float held under: buoyancy pulls them back to the surface
+   * and the damping is light, so they come up with a bob rather than gliding
+   * to rest. Positive is metres below where they float.
+   */
+  private updatePlunge(dt: number) {
+    this.plungeVel += (-PLUNGE_K * this.plunge - PLUNGE_C * this.plungeVel) * dt;
+    this.plunge += this.plungeVel * dt;
+  }
+
   private placeOnTube() {
     const c = Math.cos(this.bank);
     const s = Math.sin(this.bank);
@@ -643,6 +779,15 @@ export class Game {
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
     this.audio.splash();
+    // The rider goes under: whatever downward speed the flume left them with,
+    // inside a band, so the splash is always a dunk and a fast one is deeper.
+    this.plunge = 0;
+    this.plungeVel = THREE.MathUtils.clamp(
+      -_frame.tangent.y * this.speed * 0.95,
+      PLUNGE_MIN,
+      PLUNGE_MAX,
+    );
+    this.bubbleTime = PLUME_TIME;
     this.poolSurface?.impulse(this.px, this.pz, 1.7, 0.5);
     _tmp.set(this.px, this.current.pool.waterY + 0.2, this.pz);
     this.spray?.splash(_tmp);
@@ -682,8 +827,12 @@ export class Game {
     this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
     this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
     // The rider sits on the funnel wall, so leaning in sinks them down the
-    // throat as well as tightening the spiral.
-    this.py = pool.waterY + (this.poolSurface?.heightAt(this.whirlR, e) ?? 0) + 0.55;
+    // throat as well as tightening the spiral, and the deepest, tightest part
+    // of it rides low enough that the water washes over them.
+    this.updatePlunge(dt);
+    const dip = tight * e * 0.4;
+    this.py =
+      pool.waterY + (this.poolSurface?.heightAt(this.whirlR, e) ?? 0) + 0.55 - dip - this.plunge;
     this.eye.set(this.px, this.py + 0.62, this.pz);
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
@@ -776,10 +925,12 @@ export class Game {
       if (radial > 0) this.speed *= 0.45;
     }
 
+    this.updatePlunge(dt);
     this.py =
       pool.waterY +
       (this.poolSurface?.heightAt(this.poolRadius(), this.whirlEnergy) ?? 0) +
-      0.55;
+      0.55 -
+      this.plunge;
     this.eye.set(this.px, this.py + 0.58, this.pz);
   }
 
@@ -851,6 +1002,8 @@ export class Game {
     this.sink = 0;
     this.drop += 1;
     this.whirlEnergy = 0;
+    this.plunge = 0;
+    this.plungeVel = 0;
     this.poolSurface?.attach(next);
     // The mouth was already dressed in this theme, so the tube the rider is now
     // in matches what they aimed at; the world around it catches up.
@@ -887,7 +1040,6 @@ export class Game {
   private present(dt: number) {
     this.fadeTheme(dt);
     this.fovPunch = expDamp(this.fovPunch, 0, 4, dt);
-    this.applyFov();
     if (this.post) {
       // Radial blur rides the same cues as the FOV: a touch at full speed, a
       // pull toward the centre on the exit suck-in that decays with the punch.
@@ -895,6 +1047,8 @@ export class Game {
       this.post.zoom.value = this.reducedMotion ? 0 : 0.03 * v * v + (this.fovPunch / 12) * 0.07;
     }
     this.updateCamera(dt);
+    this.updateSubmersion(dt);
+    this.applyFov();
     this.cavern.position.copy(this.camera.position);
     this.current.tick(
       dt,
@@ -1083,6 +1237,10 @@ declare global {
       getLift?: () => number;
       getPress?: () => number;
       getWhirl?: () => { energy: number; r: number };
+      /** 0 in air, 1 under the water line. */
+      getSubmerged?: () => number;
+      /** Freeze the ride on the frame it is showing, so a capture can be aimed. */
+      pause?: (on: boolean) => void;
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
       getTheme?: () => string;

@@ -74,6 +74,9 @@ export type Theme = {
     foam: number;
     /** Tightness of the sun's glint on the surface. */
     gloss: number;
+    /** Fog density inside the body of water, and how far its colour darkens from `water`. */
+    under: number;
+    underShade: number;
   };
 
   /** What the tube interior shows: the art it carries, and how. */
@@ -158,6 +161,8 @@ const POOL: Theme["pool"] = {
   absorb: 0.22,
   foam: 0.72,
   gloss: 260,
+  under: 0.14,
+  underShade: 0.4,
 };
 
 const SCREEN: Theme["screen"] = {
@@ -240,6 +245,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.34,
       foam: 0.5,
       gloss: 400,
+      under: 0.3,
+      underShade: 0.22,
     },
     screen: {
       ...SCREEN,
@@ -297,6 +304,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.42,
       foam: 0.6,
       gloss: 160,
+      under: 0.38,
+      underShade: 0.26,
     },
     screen: {
       ...SCREEN,
@@ -354,6 +363,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.3,
       foam: 0.55,
       gloss: 220,
+      under: 0.26,
+      underShade: 0.3,
     },
     screen: {
       ...SCREEN,
@@ -423,6 +434,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.1,
       foam: 0.9,
       gloss: 520,
+      under: 0.07,
+      underShade: 0.62,
     },
     screen: {
       ...SCREEN,
@@ -491,6 +504,8 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.28,
       foam: 0.8,
       gloss: 600,
+      under: 0.22,
+      underShade: 0.38,
     },
     screen: {
       ...SCREEN,

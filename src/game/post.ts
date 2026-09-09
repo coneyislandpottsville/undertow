@@ -3,28 +3,35 @@ import {
   Fn,
   Loop,
   convertToTexture,
+  cos,
   emissive,
   float,
   int,
   length,
+  mix,
   mrt,
   output,
   pass,
+  sin,
   smoothstep,
+  time,
   uniform,
   uv,
+  vec2,
+  vec3,
   vec4,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { Node } from "three/webgpu";
 
 type F = Node<"float">;
+type V2 = Node<"vec2">;
 type V4 = Node<"vec4">;
 
 /** Zoom blur toward the screen centre; strength scales the tap length, falloff spares the centre. */
-const zoomBlur = Fn(([inputNode, strength]: [V4, F]) => {
+const zoomBlur = Fn(([inputNode, strength, warp]: [V4, F, V2]) => {
   const tex = convertToTexture(inputNode);
-  const uvNode = uv();
+  const uvNode = uv().add(warp);
   const dir = uvNode.sub(0.5);
   const falloff = smoothstep(0.05, 0.6, length(dir));
   const taps = 10;
@@ -43,6 +50,13 @@ export type RidePost = {
   zoom: { value: number };
   /** The bloom's own uniforms, so a theme can set how hard the ride glows. */
   bloom: { strength: { value: number }; radius: { value: number } };
+  /**
+   * How far the camera is under the water: the whole frame wobbles, casts to
+   * `underColor`, and closes in at the edges. The body of water's own colour
+   * and falloff are the scene fog, so this is only what the eye does.
+   */
+  under: { value: number };
+  underColor: { value: THREE.Vector3 };
   dispose: () => void;
 };
 
@@ -65,11 +79,26 @@ export function createRidePost(
   const colorNode = scenePass.getTextureNode("output");
   const glow = bloom(scenePass.getTextureNode("emissive"), 0.6, 0.4, 0);
   const zoom = uniform(0);
-  pipeline.outputNode = zoomBlur(colorNode.add(glow), zoom);
+  const under = uniform(0);
+  const underColor = uniform(new THREE.Vector3(1, 1, 1));
+
+  // The wobble rides in on the blur's own uv, so it costs nothing but the two
+  // waves: the taps are already being placed.
+  const warp = vec2(
+    sin(uv().y.mul(26).add(time.mul(1.9))),
+    cos(uv().x.mul(21).sub(time.mul(1.5))),
+  ).mul(under.mul(0.0045));
+  const composed = zoomBlur(colorNode.add(glow), zoom, warp);
+  const closeIn = mix(float(1), smoothstep(0.95, 0.2, length(uv().sub(0.5))).mul(0.8).add(0.2), under);
+  const grade = mix(vec3(1), underColor, under.mul(0.55)).mul(closeIn);
+  pipeline.outputNode = vec4(composed.rgb.mul(grade), composed.a);
+
   return {
     render: () => pipeline.render(),
     zoom,
     bloom: { strength: glow.strength, radius: glow.radius },
+    under,
+    underColor,
     dispose: () => pipeline.dispose(),
   };
 }
