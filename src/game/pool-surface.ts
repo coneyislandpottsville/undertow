@@ -42,7 +42,7 @@ import type { Node } from "three/webgpu";
 import { fieldCopy } from "./field-copy";
 import { BASIN_DEPTH, type PoolData, type RideSection } from "./generate";
 import { GRAVITY } from "./physics";
-import { colorTargets, emissiveTarget } from "./materials";
+import { colorTargets, emissiveTarget, foamGrain } from "./materials";
 import type { Theme } from "./theme";
 import { atPassDepth, reachable } from "./warm";
 
@@ -734,11 +734,17 @@ export function createPoolSurface(
   // actually sit. Coverage decides how much of the grain the foam eats, so a
   // patch is a scatter of bubbles that closes up as the water aerates rather
   // than a sheet of ring colour that blows out in the near field. The grain is
-  // in world space at two scales, so it has structure at arm's length as well
-  // as across the pool.
+  // an authored tile read in world space at two scales that do not come back
+  // round together inside a pool, so it has structure at arm's length as well as
+  // across the pool without either scale showing its own repeat.
   const coverage = sampleField(fragXZ).z.mul(uFoamAmount);
-  const coarse = mx_noise_float(fragXZ.mul(2.2).add(vec2(uTime.mul(0.12), uTime.mul(-0.08))));
-  const fine = mx_noise_float(fragXZ.mul(7.5).add(vec2(uTime.mul(-0.29), uTime.mul(0.2))));
+  const bubbles = texture(foamGrain(), fragXZ.mul(0.55).add(vec2(uTime.mul(0.03), uTime.mul(-0.02))));
+  const closer = texture(
+    foamGrain(),
+    fragXZ.mul(0.375).add(vec2(uTime.mul(-0.011), uTime.mul(0.0075))),
+  );
+  const coarse = bubbles.r.mul(2).sub(1);
+  const fine = closer.g.mul(2).sub(1);
   const grain = coarse.mul(1.1).add(fine.mul(0.7)).mul(0.5).add(0.5).clamp(0, 1);
   const foam = smoothstep(grain.mul(0.9), grain.mul(0.9).add(0.2), coverage).mul(FOAM_MAX);
   // Aerated water is lit water, not paint.

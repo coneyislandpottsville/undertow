@@ -48,7 +48,13 @@ import {
   sheetField,
   sheetFieldUV,
 } from "./sheet-field";
-import { rippleNormalCanvas, screenCanvas, streakCanvas, type ScreenArt } from "./textures";
+import {
+  grainCanvas,
+  rippleNormalCanvas,
+  screenCanvas,
+  wallCanvases,
+  type ScreenArt,
+} from "./textures";
 
 /**
  * All ride materials live here so themed environments, animated maps, and
@@ -97,8 +103,11 @@ const FILM_IDLE = 0.5;
 const FILM_CYCLE = 8;
 /** Ripple tile length along the tube, m. */
 const RIPPLE_TILE = 2;
-/** Streak tile length along the tube, m. */
-const STREAK_TILE = 5;
+/** Wall tile length along the tube, m, and how many times it wraps around. */
+const WALL_TILE = 5;
+const WALL_WRAP = 2;
+/** How far the moulding's own relief turns the shading normal. */
+const WALL_RELIEF = 0.55;
 /** How much further a reflection swings with the ripples than a refraction. */
 const REFLECT_BEND = 5;
 
@@ -107,8 +116,14 @@ const flows = new WeakMap<THREE.Material, { value: number }>();
 /** Seconds, advanced once a frame: the film's idle trickle and the panels drift on it. */
 const uClock = uniform(0);
 
-let streakTex: THREE.CanvasTexture | null = null;
+type WallTextures = {
+  albedo: THREE.CanvasTexture;
+  normal: THREE.CanvasTexture;
+  surface: THREE.CanvasTexture;
+};
+let wallTex: WallTextures | null = null;
 let rippleTex: THREE.CanvasTexture | null = null;
+let grainTex: THREE.CanvasTexture | null = null;
 
 function repeatTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas);
@@ -163,9 +178,26 @@ function screenTexture(art: ScreenArt): THREE.Texture {
 }
 
 function tubeTextures() {
-  streakTex ??= repeatTexture(streakCanvas(true));
+  if (!wallTex) {
+    const maps = wallCanvases();
+    wallTex = {
+      albedo: repeatTexture(maps.albedo),
+      normal: repeatTexture(maps.normal),
+      surface: repeatTexture(maps.surface),
+    };
+  }
   rippleTex ??= repeatTexture(rippleNormalCanvas(256, 11, 1.2));
-  return { streak: streakTex, ripple: rippleTex };
+  return { wall: wallTex, ripple: rippleTex };
+}
+
+/**
+ * The scatter of bubbles a patch of foam closes up as the water aerates, in
+ * world metres per tile. Both waters read it, so a fetch stands in for the noise
+ * they each used to evaluate.
+ */
+export function foamGrain(): THREE.CanvasTexture {
+  grainTex ??= repeatTexture(grainCanvas());
+  return grainTex;
 }
 
 /**
@@ -191,18 +223,21 @@ function flowNormal(uvNode: V2, flowDist: Node<"float">, length: number, radius:
     .normalize();
 }
 
+/** Where a point on the tube sits in the wall tile. */
+function wallUV(uvNode: V2, length: number): V2 {
+  return vec2(uvNode.x.mul(length / WALL_TILE), uvNode.y.mul(WALL_WRAP));
+}
+
 /**
- * What the tube wall carries: its streak map in the theme's tube colour, and
- * the lit panel of art every `pitch` metres, drifting along it. Both the wall
- * and the sheet of water over it read this, so the art runs on under the water
- * rather than stopping at its edge.
+ * What the tube wall carries: its albedo in the theme's tube colour, and the lit
+ * panel of art every `pitch` metres, drifting along it. Both the wall and the
+ * sheet of water over it read this, so the art runs on under the water rather
+ * than stopping at its edge.
  */
 function wallLook(theme: Theme, uvNode: V2, length: number) {
-  const { streak } = tubeTextures();
-  const wall = texture(
-    streak,
-    vec2(uvNode.x.mul(length / STREAK_TILE), uvNode.y.mul(2)),
-  ).rgb.mul(color(theme.tube));
+  const wall = texture(tubeTextures().wall.albedo, wallUV(uvNode, length)).rgb.mul(
+    color(theme.tube),
+  );
 
   const screen = theme.screen;
   const along = uvNode.x.mul(length / screen.pitch).sub(uClock.mul(screen.drift / screen.pitch));
@@ -250,6 +285,12 @@ export function createTubeMaterial(
   const wet = smoothstep(-0.15, 0.85, dot(worldNormal, down));
 
   const tn = flowNormal(uv(), flowDist, length, radius);
+  // The moulding itself: the flow lines pulled down the tube, the seam rings and
+  // the orange peel, with what gloss survives in a groove and what light reaches
+  // the bottom of one.
+  const { wall } = tubeTextures();
+  const mould = texture(wall.normal, wallUV(uv(), length)).xyz.mul(2).sub(1);
+  const worn = texture(wall.surface, wallUV(uv(), length));
   // Wall seen through the film: the map sampled with a normal-driven offset.
   const look = wallLook(theme, uv().add(tn.xy.mul(0.02).mul(wet)), length);
   const wallColor = look.wall;
@@ -268,11 +309,16 @@ export function createTubeMaterial(
   mat.colorNode = wallColor.mul(filmTint).add(panel);
   const glow = materialEmissive.add(panel.mul(screen.glow));
   mat.emissiveNode = mouth ? glow.mul(glowFalloff()) : glow;
-  mat.normalNode = normalMap(
-    tn.mul(0.5).add(0.5),
-    vec2(mix(float(film.normalDry), float(film.normalWet), wet)),
-  );
-  mat.roughnessNode = mix(float(film.dry), float(film.wet), wet);
+  // The film's ripples ride the moulding, so the two tangent-space normals are
+  // added and renormalised rather than one replacing the other; the ripples come
+  // and go with the water, the moulding does not.
+  const relief = vec3(
+    tn.xy.mul(mix(float(film.normalDry), float(film.normalWet), wet)).add(mould.xy.mul(WALL_RELIEF)),
+    1,
+  ).normalize();
+  mat.normalNode = normalMap(relief.mul(0.5).add(0.5), vec2(1, 1));
+  mat.roughnessNode = mix(float(film.dry), float(film.wet), wet).mul(worn.r.add(0.5));
+  mat.aoNode = worn.g;
   mat.anisotropyNode = vec2(wet.mul(film.streak).add(0.001), 0.001);
   mat.anisotropy = 1;
   flows.set(mat, uFlow);
@@ -423,14 +469,13 @@ export function createSheetMaterial(
   // line the sheet foams along wherever it runs out. How much of it there is
   // decides how much of a drifting grain it fills, so a patch is a scatter of
   // bubbles closing up rather than a wash of ring colour.
-  const grain = mx_noise_float(
+  const grain = texture(
+    foamGrain(),
     vec2(
       uv().x.mul(length / FOAM_GRAIN).sub(flowDist.div(FOAM_GRAIN)),
       uv().y.mul(around / FOAM_GRAIN),
     ),
-  )
-    .mul(0.5)
-    .add(0.5);
+  ).g;
   const froth = sheetField.sample(fieldAt).z.mul(uPlough.w);
   const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.2), froth)
     .add(crest)
