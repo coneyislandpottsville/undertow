@@ -35,7 +35,7 @@ import {
   vertexStage,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import { rippleNormalCanvas, streakCanvas } from "./textures";
+import { rippleNormalCanvas, screenCanvas, streakCanvas, type ScreenArt } from "./textures";
 
 /**
  * All ride materials live here so themed environments, animated maps, and
@@ -91,6 +91,50 @@ function repeatTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   return tex;
 }
 
+let screenOverride: THREE.Texture | null = null;
+const screens = new Map<ScreenArt, THREE.CanvasTexture>();
+
+/**
+ * Point every tube panel at an image or a video instead of the theme's art.
+ * The panels are the same nodes either way; only the source changes, so this
+ * is where a per-section video texture arrives. Call before any section is
+ * built. `?screen=`; a URL ending in a video extension becomes a VideoTexture.
+ */
+export function setScreenSource(url: string | null) {
+  screenOverride?.dispose();
+  screenOverride = null;
+  if (!url) return;
+  if (/\.(mp4|webm|ogv|mov)(\?|$)/i.test(url)) {
+    const video = document.createElement("video");
+    video.src = url;
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = "anonymous";
+    void video.play();
+    screenOverride = new THREE.VideoTexture(video);
+  } else {
+    screenOverride = new THREE.TextureLoader().load(url);
+  }
+  screenOverride.wrapS = THREE.RepeatWrapping;
+  screenOverride.wrapT = THREE.ClampToEdgeWrapping;
+  screenOverride.colorSpace = THREE.SRGBColorSpace;
+}
+
+function screenTexture(art: ScreenArt): THREE.Texture {
+  if (screenOverride) return screenOverride;
+  let tex = screens.get(art);
+  if (!tex) {
+    tex = new THREE.CanvasTexture(screenCanvas(art));
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 8;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    screens.set(art, tex);
+  }
+  return tex;
+}
+
 function tubeTextures() {
   streakTex ??= repeatTexture(streakCanvas(true));
   rippleTex ??= repeatTexture(rippleNormalCanvas(256, 11, 1.2));
@@ -110,6 +154,9 @@ export function createTubeMaterial(
   theme: Theme,
   length = 12,
   radius = 2.75,
+  /** A mouth is stared at from across the pool and then flown through, so its
+   *  glow gives way at point-blank range. */
+  mouth = false,
 ): THREE.MeshPhysicalNodeMaterial {
   const { streak, ripple } = tubeTextures();
   const film = theme.film;
@@ -148,13 +195,36 @@ export function createTubeMaterial(
   const wallColor = texture(streak, wallUV).rgb.mul(color(theme.tube));
   const filmTint = mix(vec3(1), color(theme.water).mul(1.3), wet.mul(film.tint));
 
+  // The interior is a screen: a lit panel of wall every `pitch` metres carrying
+  // the theme's art, drifting along the tube. The film runs over it, so a panel
+  // shows where the wall is dry and gives way where the water sheets.
+  const screen = theme.screen;
+  const along = uv()
+    .x.mul(length / screen.pitch)
+    .sub(uClock.mul(screen.drift / screen.pitch));
+  const cell = fract(along);
+  const edge = (1 - screen.fill) * 0.5;
+  const band = smoothstep(edge, edge + 0.05, cell).mul(
+    smoothstep(1 - edge - 0.05, 1 - edge, cell).oneMinus(),
+  );
+  const art = texture(
+    screenTexture(screen.art),
+    vec2(uv().y.mul(screen.wrap), cell.sub(edge).div(screen.fill).clamp(0, 1)),
+  );
+  const panel = art.rgb
+    .mul(art.a)
+    .mul(color(screen.tint))
+    .mul(band.mul(wet.oneMinus()).mul(screen.strength));
+
   const mat = new THREE.MeshPhysicalNodeMaterial({
     side: THREE.BackSide,
     metalness: film.metalness,
     emissive: new THREE.Color(theme.tube),
     emissiveIntensity: film.glow,
   });
-  mat.colorNode = wallColor.mul(filmTint);
+  mat.colorNode = wallColor.mul(filmTint).add(panel);
+  const glow = materialEmissive.add(panel.mul(screen.glow));
+  mat.emissiveNode = mouth ? glow.mul(glowFalloff()) : glow;
   mat.normalNode = normalMap(
     tn.mul(0.5).add(0.5),
     vec2(mix(float(film.normalDry), float(film.normalWet), wet)),
@@ -341,10 +411,9 @@ export function createMouthMaterial(
   length = 9,
   radius = 2.75,
 ): THREE.MeshPhysicalNodeMaterial {
-  const mat = createTubeMaterial(theme, length, radius);
+  const mat = createTubeMaterial(theme, length, radius, true);
   mat.emissive = new THREE.Color(theme.accent);
   mat.emissiveIntensity = theme.exit.mouth;
-  mat.emissiveNode = materialEmissive.mul(glowFalloff());
   return mat;
 }
 
