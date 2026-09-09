@@ -127,3 +127,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 7.5, the water within reach (Step 5) | tube | webgl | 327 (2.8) | 217 (4.4) |
 | 7.5, the water within reach (Step 5) | pool | webgpu | 177 (0.3) | 105 (0.4) |
 | 7.5, the water within reach (Step 5) | pool | webgl | 152 (5.2) | 99 (8.6) |
+| 8.1, the sheet in the flume (Step 1) | tube | webgpu | 344 (0.4) | 228 (0.6) |
+| 8.1, the sheet in the flume (Step 1) | tube | webgl | 312 (2.8) | 202 (4.1) |
+| 8.1, the sheet in the flume (Step 1) | pool | webgpu | 174 (0.2) | 108 (0.4) |
+| 8.1, the sheet in the flume (Step 1) | pool | webgl | 140 (5.8) | 94 (9.3) |

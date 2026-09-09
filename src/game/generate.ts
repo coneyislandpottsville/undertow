@@ -18,6 +18,7 @@ import {
   tickMaterials,
   ploughSheet,
   scrollTube,
+  setSheetField,
   themeForSeed,
   type Theme,
 } from "./materials";
@@ -51,9 +52,10 @@ export type RideSection = {
   /** Flat stand-in disc; the pool surface rig hides it for the pool it is in. */
   water: THREE.Mesh;
   /**
-   * Animate this section's cues; call once per frame for the section the rider
-   * is in. `speed` scrolls the tube's flow streaks; pass 0 outside the tube.
+   * The flume's sheet: the metres of tube it covers, which is the field's own
+   * axis, and the switch that hands it the field while the rider is in here.
    */
+  sheet: { span: number; setField: (amount: number) => void };
   /**
    * Advance what the section animates. `rider` is where the rider is along this
    * section's tube (0 to 1, negative when they are elsewhere), how fast, and
@@ -542,7 +544,7 @@ function addMouth(
 
   // The same sheet the tube beyond it runs, so the water does not stop at the
   // mouth and start again inside.
-  const sheetGeo = buildSheet(geo, 12, () => 1);
+  const sheetGeo = buildSheet(curve, 12, 10, radius, () => 1, () => DOWN);
   const sheetMat = createSheetMaterial(theme, 9, radius);
   const sheetMesh = new THREE.Mesh(sheetGeo, sheetMat);
   sheetMesh.frustumCulled = false;
@@ -574,7 +576,7 @@ function assembleMeshes(
   pool: PoolData,
   exits: Exit[],
   theme: Theme,
-): Pick<RideSection, "group" | "water" | "tick" | "dispose"> {
+): Pick<RideSection, "group" | "water" | "sheet" | "tick" | "dispose"> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -600,9 +602,19 @@ function assembleMeshes(
   geometries.push(tubeGeo);
   materials.push(tubeMat);
 
-  const sheetGeo = buildSheet(tubeGeo, tubular, (u) => sampleApparentG(path, u * path.length));
-  sheetGeo.setDrawRange(0, rings * RADIAL * 6);
-  const sheetMat = createSheetMaterial(theme, path.length, path.radius);
+  const sheetTubular = tubular * SHEET_ALONG;
+  const sheetGeo = buildSheet(
+    path.curve,
+    sheetTubular,
+    SHEET_RADIAL,
+    path.radius,
+    (u) => sampleApparentG(path, u * path.length),
+    (u) => sampleApparentDown(path, u * path.length),
+  );
+  const sheetRings = Math.max(1, Math.round((stop / path.length) * sheetTubular));
+  sheetGeo.setDrawRange(0, sheetRings * SHEET_RADIAL * 6);
+  const sheetSpan = (sheetRings / sheetTubular) * path.length;
+  const sheetMat = createSheetMaterial(theme, path.length, path.radius, sheetSpan);
   const sheet = new THREE.Mesh(sheetGeo, sheetMat);
   sheet.frustumCulled = false;
   sheet.renderOrder = 2;
@@ -676,6 +688,7 @@ function assembleMeshes(
   return {
     group,
     water,
+    sheet: { span: sheetSpan, setField: (amount) => setSheetField(sheetMat, amount) },
     tick: (dt, elapsed, rider) => {
       scrollTube(tubeMat, dt, rider.speed);
       scrollTube(sheetMat, dt, rider.speed);
@@ -709,20 +722,36 @@ function assembleMeshes(
  * presses harder, and the whole tube is never full.
  */
 const SHEET_G_CAP = 3;
+/** How much finer than the tube the sheet is drawn, along it and around it. */
+const SHEET_ALONG = 2;
+const SHEET_RADIAL = 48;
 
 /**
- * The sheet of water the flume runs, built from the tube it runs in.
+ * The sheet of water the flume runs, built on the tube's own curve.
  *
- * It is the tube's own geometry with the apparent gravity of each ring on it;
- * the levelling happens in the vertex stage, so how deep the water stands can
- * answer the rider rather than being fixed when the section is built. `aG` is
- * the nominal apparent gravity along the tube, which is what the water levels
- * to everywhere the rider is not.
+ * It carries the apparent gravity of each ring; the levelling happens in the
+ * vertex stage, so how deep the water stands can answer the rider rather than
+ * being fixed when the section is built. `aG` is the nominal apparent gravity
+ * along the tube, which is what the water levels to everywhere the rider is not.
+ *
+ * It is drawn finer than the tube it lies in, because the tube's rings are what
+ * the field would otherwise be facetted by: the wetted arc is a fifth of the
+ * ring, so most of the extra vertices go across the channel, where the field's
+ * waves run in and out of the banks.
  */
-function buildSheet(tubeGeo: THREE.BufferGeometry, tubular: number, gAt: (u: number) => number) {
-  const geo = tubeGeo.clone();
+function buildSheet(
+  curve: THREE.Curve<THREE.Vector3>,
+  tubular: number,
+  radial: number,
+  radius: number,
+  gAt: (u: number) => number,
+  downAt: (u: number) => THREE.Vector3,
+) {
+  const geo = new THREE.TubeGeometry(curve, tubular, radius, radial, false);
+  geo.computeTangents();
+  addApparentDown(geo, tubular, radial, downAt);
   const count = geo.attributes.position!.count;
-  const perRing = count / (tubular + 1);
+  const perRing = radial + 1;
   const g = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     g[i] = THREE.MathUtils.clamp(gAt(Math.floor(i / perRing) / tubular), 0, SHEET_G_CAP);

@@ -5,7 +5,7 @@ import { exitSeed, generateSection, startPose, type RideSection } from "./genera
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
-import { setScreenSource } from "./materials";
+import { flumeFlow, setScreenSource } from "./materials";
 import { createRidePost, type RidePost } from "./post";
 import {
   UNREFLECTED,
@@ -13,6 +13,7 @@ import {
   poolSurfaceOptions,
   type PoolSurface,
 } from "./pool-surface";
+import { createSheetField, type SheetField } from "./sheet-field";
 import { createSpray, sprayOptions, type Spray } from "./spray";
 import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
 import { Rng, forkSeed, seedFromQuery } from "./rng";
@@ -139,6 +140,8 @@ const _themeColor = new THREE.Color();
 const _flow = new THREE.Vector2();
 const _slope = new THREE.Vector2();
 const _under = new THREE.Vector3();
+const _flumeUp = new THREE.Vector3();
+const _flumeBank = new THREE.Vector3();
 const _bubbleAt = new THREE.Vector3();
 const _white = new THREE.Vector3(1, 1, 1);
 /** What the section's sheet is told about the rider each frame. */
@@ -201,6 +204,9 @@ export class Game {
    * backend the renderer settled on.
    */
   private poolSurface: PoolSurface | null = null;
+  /** The flume's water, moved to the section the rider is in. */
+  private sheetField: SheetField | null = null;
+
   /** Spray and mist, simulated in compute; built in start() with the surface. */
   private spray: Spray | null = null;
   /** Extra vertical FOV, degrees, punched on exit and decaying. */
@@ -473,11 +479,17 @@ export class Game {
     this.api.backend = this.backend;
     this.api.ready = true;
     this.resize();
+    const options = poolSurfaceOptions(this.query);
+    // The flume first: the pool's inflow reads what it is delivering.
+    const flume = createSheetField(this.renderer, options.ripples === "field");
+    this.sheetField = flume;
+    flume.attach(this.current);
     const surface = createPoolSurface(
       this.renderer,
       this.scene,
       this.camera,
-      poolSurfaceOptions(this.query),
+      options,
+      flume.outfall,
     );
     this.poolSurface = surface;
     surface.attach(this.current);
@@ -506,6 +518,7 @@ export class Game {
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
     this.poolSurface?.dispose();
+    this.sheetField?.dispose();
     this.spray?.dispose();
     this.post?.dispose();
     if (this.initialized) this.renderer.dispose();
@@ -1184,6 +1197,7 @@ export class Game {
     this.driftX = 0;
     this.driftZ = 0;
     this.poolSurface?.attach(next);
+    this.sheetField?.attach(next);
     // The mouth was already dressed in this theme, so the tube the rider is now
     // in matches what they aimed at; the world around it catches up.
     this.themeTarget = next.theme;
@@ -1234,6 +1248,7 @@ export class Game {
     _rider.speed = sliding ? this.speed : 0;
     _rider.g = THREE.MathUtils.clamp(this.press / GRAVITY, 0, 3);
     this.current.tick(dt, this.clock.elapsed, _rider);
+    this.updateSheetField(dt);
     this.updatePoolSurface(dt);
     this.updateSpray(dt);
     this.audio.update(
@@ -1254,6 +1269,51 @@ export class Game {
         g: this.mode === "slide" ? this.press / GRAVITY : 1,
       });
     }
+  }
+
+  /**
+   * Feed the flume's water: where the rider's hull is in the channel, how wide
+   * and how deep that channel is there, how fast the flume is running, and what
+   * the pool the last few metres stand in is doing.
+   */
+  private updateSheetField(dt: number) {
+    const flume = this.sheetField;
+    if (!flume) return;
+    const pool = this.current.pool;
+    flume.setPoolLevel(
+      this.poolSurface?.chopAt(pool.inflow.x, pool.inflow.z, this.clock.elapsed) ?? 0,
+    );
+    const path = this.current.path;
+    const sheet = this.current.theme.sheet;
+    const radius = path.radius;
+    const i = THREE.MathUtils.clamp(
+      Math.round(this.dist / path.spacing),
+      0,
+      path.samples.length - 1,
+    );
+    const sample = path.samples[i]!;
+    // The channel where the rider is, on the gravity their ring was drawn for:
+    // the same half-width the sheet's own vertices normalise against.
+    const nominal = THREE.MathUtils.clamp(
+      radius * (sheet.depth + sheet.depthG * sample.apparentG),
+      0.02,
+      radius * 1.9,
+    );
+    const halfWidth = Math.max(0.35, Math.sqrt(nominal * (radius * 2 - nominal)));
+    if (_rider.along < 0) {
+      flume.setRider(-1, 0, halfWidth, 0, flumeFlow(0));
+    } else {
+      _flumeUp.copy(sample.apparentDown).negate();
+      _flumeBank.crossVectors(_flumeUp, _frame.tangent).normalize();
+      flume.setRider(
+        Math.min(1, this.dist / this.current.sheet.span),
+        THREE.MathUtils.clamp((radius * this.radial.dot(_flumeBank)) / halfWidth, -1, 1),
+        halfWidth,
+        radius * (sheet.depth + sheet.depthG * _rider.g),
+        flumeFlow(this.speed),
+      );
+    }
+    flume.update(dt, this.clock.elapsed);
   }
 
   /**

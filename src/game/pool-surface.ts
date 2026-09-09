@@ -166,6 +166,8 @@ const FOAM_INFLOW = 0.5;
  */
 const INFLOW_CHURN = 0.18;
 const INFLOW_GRIP = 0.05;
+/** Metres of pool the flume's own surge is worth where it lands. */
+const INFLOW_SURGE = 0.5;
 const FOAM_LAP = 0.7;
 /** Slope a wave breaks over, and how hard the crest whitens once it does. */
 const BREAK_LOW = 0.28;
@@ -343,6 +345,8 @@ export function createPoolSurface(
   scene: THREE.Scene,
   camera: THREE.Camera,
   options: PoolSurfaceOptions,
+  /** What the flume is delivering over the pool's own level there, in metres. */
+  outfall: F,
 ): PoolSurface {
   const useSim = options.ripples === "field";
   const uTime = uniform(0);
@@ -559,6 +563,9 @@ export function createPoolSurface(
     const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
     const dIn = length(p.sub(uInflow.xy));
     const landing = exp(dIn.mul(dIn).div(3).negate()).mul(uInflow.z);
+    // What the flume is handing over. The rider pushes a bow down it, so the
+    // water under the mouth is already piling before they come out of it.
+    const delivered = outfall.mul(INFLOW_SURGE);
     const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
     const raw = here.x.mul(LEVEL_DAMP).add(moved);
     const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
@@ -570,7 +577,8 @@ export function createPoolSurface(
     // fall is doing to it, and the rings leave because its neighbours take it up.
     const stir = sin(uTime.mul(5.1))
       .add(sin(uTime.mul(3.17).add(2)))
-      .mul(0.5 * INFLOW_CHURN);
+      .mul(0.5 * INFLOW_CHURN)
+      .add(delivered);
     const height = mix(limited, stir, landing.mul(INFLOW_GRIP)).mul(inside);
 
     // Foam is carried the same way, so the spiral arms of a whirlpool are a
@@ -590,7 +598,7 @@ export function createPoolSurface(
       .mul(FOAM_BREAK);
     const lip = smoothstep(0.16, 0.02, abs(rho.sub(lipRho))).mul(uEnergy).mul(FOAM_LIP);
     const wake = exp(dWake.mul(dWake).div(1.6).negate()).mul(uWake.w).mul(FOAM_WAKE);
-    const inflow = landing.mul(FOAM_INFLOW);
+    const inflow = landing.mul(abs(delivered).mul(4).add(1)).mul(FOAM_INFLOW);
     // Water breaking against the wall, so the rim is never a clean edge.
     const lapping = smoothstep(uRadius.sub(1.8), uRadius.sub(0.2), r)
       .mul(waves(p).mul(6).add(0.25).max(0))
