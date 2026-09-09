@@ -39,6 +39,7 @@ import {
   viewportSharedTexture,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
+import { fieldCopy } from "./field-copy";
 import { BASIN_DEPTH, type PoolData, type RideSection } from "./generate";
 import { GRAVITY } from "./physics";
 import { colorTargets, emissiveTarget } from "./materials";
@@ -68,13 +69,9 @@ const SIGMA_MIN = 0.2;
 const SIGMA_MAX = 0.54;
 /** Metres the field's height may reach either side of the still water line. */
 const FIELD_CLAMP = 1.2;
-/**
- * Texels per side of the copy of the field the CPU reads back.
- *
- * Forty-centimetre cells over the pool, which is finer than the crown of a
- * splash and far finer than the ring it leaves. A row has to be a multiple of
- * 256 bytes or the WebGPU copy pads it.
- */
+/** Fastest the pool's surface is read as rising or falling, m/s. */
+const RISE_MAX = 10;
+/** Texels per side of the copy of the field the CPU reads back. */
 const MIRROR = 128;
 const STEP = 1 / 60;
 /** One texel of the field, m. */
@@ -508,6 +505,8 @@ export function createPoolSurface(
   const rt = [makeFieldTarget(), makeFieldTarget()];
   let read = 0;
   const uPrev = texture(rt[1].texture);
+  /** The half before the one the surface is reading, for the rate the copy carries. */
+  const uBefore = texture(rt[1].texture);
   /** 1 wipes the field, for a pool the rig has just moved onto. */
   const uClear = uniform(0);
 
@@ -672,6 +671,7 @@ export function createPoolSurface(
     uClear.value = clear ? 1 : 0;
     uPrev.value = rt[read].texture;
     intoTarget(rt[read ^ 1]!, fieldScene);
+    uBefore.value = rt[read].texture;
     read ^= 1;
     uField.value = rt[read].texture;
   };
@@ -680,86 +680,14 @@ export function createPoolSurface(
   const sampleField = (p: V2) => uField.sample(fieldUV(p));
 
   // ---- the copy the game reads ---------------------------------------------
-  // The ride has to know where the water is to play on it: whether a wave has
-  // washed over the eye, how far a splash lifts the rider, where a bubble
-  // reaches air. The field is a texture, so a small pass writes its height into
-  // a byte target and that is read back asynchronously, one request in flight.
-  // Sixteen bits across the field's own clamp is finer than the water ever
-  // moves, and the read lands a frame or two late, which against water is
-  // nothing.
-  //
-  // Reading a target back does not go through a sampler, and the two backends
-  // disagree about which end of the texture the first row is. Measured against a
-  // splash at a known place: the WebGL 2 tier hands the field back upside down
-  // and WebGPU does not. The pass writes it the way up the reader expects, so
-  // nothing above here has to know.
-  const uReadFlip = uniform(
-    (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 0 : 1,
-  );
-  const mirrorMat = new THREE.MeshBasicNodeMaterial();
-  {
-    const cell = uField.sample(vec2(uv().x, mix(uv().y, uv().y.oneMinus(), uReadFlip)));
-    const q = cell.x.add(FIELD_CLAMP).div(FIELD_CLAMP * 2).clamp(0, 1).mul(65535);
-    const high = q.div(256).floor();
-    // Height fills two channels; the third carries the foam, which the copy was
-    // already paying for and nothing was reading.
-    mirrorMat.colorNode = vec4(high.div(255), q.sub(high.mul(256)).div(255), cell.z, 1);
-  }
-  const mirrorRT = new THREE.RenderTarget(MIRROR, MIRROR, {
-    depthBuffer: false,
-    stencilBuffer: false,
-  });
-  const mirrorQuad = new THREE.Mesh(fieldQuad.geometry, mirrorMat);
-  mirrorQuad.frustumCulled = false;
-  const mirrorScene = new THREE.Scene();
-  mirrorScene.add(mirrorQuad);
-  let mirror: Uint8Array | null = null;
-  let mirrorBusy = false;
-
-  const readMirror = () => {
-    if (mirrorBusy) return;
-    mirrorBusy = true;
-    intoTarget(mirrorRT, mirrorScene);
-    void renderer
-      .readRenderTargetPixelsAsync(mirrorRT, 0, 0, MIRROR, MIRROR)
-      .then((data) => {
-        mirror = data as Uint8Array;
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        mirrorBusy = false;
-      });
-  };
-
-  /** Height in metres, from the two channels it is packed across. */
-  const heightTexel = (data: Uint8Array, i: number) =>
-    ((data[i]! * 256 + data[i + 1]!) / 65535) * (FIELD_CLAMP * 2) - FIELD_CLAMP;
-  const foamTexel = (data: Uint8Array, i: number) => data[i + 2]! / 255;
-
-  /** Bilinear read of the copy at a plane point. Zero until the first read lands. */
-  const sampleMirror = (
-    px: number,
-    pz: number,
-    decode: (data: Uint8Array, i: number) => number,
-  ): number => {
-    const data = mirror;
-    if (!data) return 0;
-    const u = (px / (PLANE_HALF * 2) + 0.5) * MIRROR - 0.5;
-    const v = (pz / (PLANE_HALF * 2) + 0.5) * MIRROR - 0.5;
-    const x0 = Math.floor(u);
-    const y0 = Math.floor(v);
-    const fx = u - x0;
-    const fy = v - y0;
-    const texel = (x: number, y: number) => {
-      const cx = x < 0 ? 0 : x > MIRROR - 1 ? MIRROR - 1 : x;
-      const cy = y < 0 ? 0 : y > MIRROR - 1 ? MIRROR - 1 : y;
-      return decode(data, (cy * MIRROR + cx) * 4);
-    };
-    const lower = texel(x0, y0) + (texel(x0 + 1, y0) - texel(x0, y0)) * fx;
-    const upper = texel(x0, y0 + 1) + (texel(x0 + 1, y0 + 1) - texel(x0, y0 + 1)) * fx;
-    return lower + (upper - lower) * fy;
-  };
-  const fieldHeight = (px: number, pz: number) => sampleMirror(px, pz, heightTexel);
+  // Forty-centimetre cells over the pool, which is finer than the crown of a
+  // splash and far finer than the ring it leaves.
+  const copy = fieldCopy(renderer, MIRROR, MIRROR, uField, uBefore, FIELD_CLAMP, STEP, RISE_MAX);
+  const _read = new THREE.Vector3();
+  /** The copy at a plane point: metres about the still line, m/s, and foam. */
+  const readAt = (px: number, pz: number) =>
+    copy.at(px / (PLANE_HALF * 2) + 0.5, pz / (PLANE_HALF * 2) + 0.5, _read);
+  const fieldHeight = (px: number, pz: number) => readAt(px, pz).x;
   /** One texel of the copy, m: the shortest baseline a slope can be taken over. */
   const MIRROR_CELL = (PLANE_HALF * 2) / MIRROR;
 
@@ -1012,7 +940,7 @@ export function createPoolSurface(
       // clean and is then run forward to where its own inflow and its own wall
       // have left it.
       stepField(true);
-      mirror = null;
+      copy.clear();
       priming = FIELD_PRIME;
     },
     heightAt: funnelHeight,
@@ -1045,7 +973,7 @@ export function createPoolSurface(
     },
     foamAt(x, z) {
       if (!pool) return 0;
-      return sampleMirror(x - pool.center.x, z - pool.center.z, foamTexel);
+      return readAt(x - pool.center.x, z - pool.center.z).z;
     },
     waterLineNode,
     setUnder(under) {
@@ -1119,7 +1047,7 @@ export function createPoolSurface(
       for (let i = 0; i < Math.min(priming, FIELD_CATCHUP); i++) stepField();
       priming = Math.max(0, priming - FIELD_CATCHUP);
       if (!mesh.visible) {
-        if (priming > 0) readMirror();
+        if (priming > 0) copy.read();
         return;
       }
       acc += dt;
@@ -1135,7 +1063,7 @@ export function createPoolSurface(
         steps++;
       }
       if (acc > STEP * 3) acc = 0;
-      readMirror();
+      copy.read();
     },
     warm,
     info: () => ({ reflect: options.reflect }),
@@ -1144,8 +1072,7 @@ export function createPoolSurface(
       geo.dispose();
       mat.dispose();
       fieldMat.dispose();
-      mirrorMat.dispose();
-      mirrorRT.dispose();
+      copy.dispose();
       fieldQuad.geometry.dispose();
       for (const t of rt) t.dispose();
       if (attached) attached.water.visible = true;

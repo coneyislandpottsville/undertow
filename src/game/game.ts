@@ -42,6 +42,30 @@ const PENDULUM_GAIN = 1.7;
 const LIFT_MAX = 1.0;
 /** How far the seat sinks into the wall under heavy g, m. */
 const SINK_MAX = 0.18;
+/**
+ * How the sheet under the rider moves the seat: how fast the seat follows the
+ * water, how fast the draft it is measured against settles, and the metres of
+ * heave it may reach.
+ *
+ * The rider displaces a crater and floats in it, so the water directly under
+ * them stands low the whole time they are there. What shakes the seat is what
+ * the flume is doing over that, which is the fast half of the same reading.
+ */
+const HEAVE_LAMBDA = 11;
+const DRAFT_LAMBDA = 1.1;
+const HEAVE_MAX = 0.3;
+/**
+ * How much of the flume's own tilt the rider runs down, and the m/s² it may
+ * reach. A float on a tilted surface accelerates along it at the apparent
+ * gravity pressing it in — in airtime nothing presses them into anything, so
+ * there is no water underfoot to run down — and only part of the rider is in
+ * the water. A spike where the field is held at what feeds each end of the
+ * flume must not stop the ride.
+ */
+const SHEET_PUSH = 0.5;
+const SHEET_PUSH_MAX = 2.5;
+/** Metres down the flume that tilt is measured over: wider than the hull's own crater. */
+const SHEET_BASELINE = 4;
 /** How far down the tube the camera peeks, m. */
 const LOOK_AHEAD = 6;
 const PADDLE_ACCEL = 18;
@@ -127,6 +151,7 @@ function makeFrame() {
   };
 }
 const _frame = makeFrame();
+const _sheet = new THREE.Vector3();
 const _ahead = makeFrame();
 const _up = new THREE.Vector3(0, 1, 0);
 const _look = new THREE.Vector3();
@@ -259,6 +284,12 @@ export class Game {
   private lift = 0;
   /** Heavy-g sink into the wall, m. */
   private sink = 0;
+  /** The flume's water under the rider: the draft they float at, the heave over it, m. */
+  private draft = 0;
+  private heave = 0;
+  /** Its tilt down the flume, and how broken it is where they are sitting. */
+  private sheetSlope = 0;
+  private sheetFoam = 0;
   /** Apparent acceleration pressing the rider into the wall, m/s² (negative in airtime). */
   private press = GRAVITY;
   private yaw = 0;
@@ -815,6 +846,15 @@ export class Game {
     if (throttle > 0) this.speed += PADDLE_ACCEL * throttle * dt;
     if (throttle < 0) this.speed -= BRAKE_DRAG * -throttle * this.speed * dt;
     this.speed -= QUAD_DRAG * this.speed * this.speed * dt;
+    // The water is not level. A rider pushes a bow ahead of them at a crawl and
+    // trails it at speed, so what they are running up or down is their own wave
+    // as much as the flume's.
+    this.speed -=
+      THREE.MathUtils.clamp(
+        Math.max(0, this.press) * this.sheetSlope * SHEET_PUSH,
+        -SHEET_PUSH_MAX,
+        SHEET_PUSH_MAX,
+      ) * dt;
     this.speed = THREE.MathUtils.clamp(this.speed, MIN_SPEED, MAX_SPEED);
     this.dist += this.speed * dt;
 
@@ -932,7 +972,7 @@ export class Game {
     const c = Math.cos(this.bank);
     const s = Math.sin(this.bank);
     this.radial.copy(_frame.normal).multiplyScalar(-c).addScaledVector(_frame.binormal, -s);
-    const seat = this.current.path.radius - SIT - HEAD - this.lift + this.sink;
+    const seat = this.current.path.radius - SIT - HEAD - this.lift + this.sink - this.heave;
     this.eye.copy(_frame.position).addScaledVector(this.radial, seat);
     this.px = this.eye.x;
     this.py = this.eye.y;
@@ -1358,6 +1398,9 @@ export class Game {
     this.bob = 0;
     this.driftX = 0;
     this.driftZ = 0;
+    this.draft = 0;
+    this.heave = 0;
+    this.sheetSlope = 0;
     this.poolSurface?.attach(next);
     this.sheetField?.attach(next);
     this.lamps.attach(next);
@@ -1428,7 +1471,9 @@ export class Game {
       this.speed,
       this.mode,
       this.mode === "whirl" ? this.whirlSpin : 0,
-      this.mode === "slide" ? 0 : (this.poolSurface?.foamAt(this.px, this.pz) ?? 0),
+      this.mode === "slide"
+        ? this.sheetFoam
+        : (this.poolSurface?.foamAt(this.px, this.pz) ?? 0),
     );
 
     this.hudTick += dt;
@@ -1475,18 +1520,59 @@ export class Game {
     const halfWidth = Math.max(0.35, Math.sqrt(nominal * (radius * 2 - nominal)));
     if (_rider.along < 0) {
       flume.setRider(-1, 0, halfWidth, 0, flumeFlow(0));
+      this.readSheet(dt, flume, -1, 0);
     } else {
       _flumeUp.copy(sample.apparentDown).negate();
       _flumeBank.crossVectors(_flumeUp, _frame.tangent).normalize();
+      const along = Math.min(1, this.dist / this.current.sheet.span);
+      const lateral = THREE.MathUtils.clamp(
+        (radius * this.radial.dot(_flumeBank)) / halfWidth,
+        -1,
+        1,
+      );
       flume.setRider(
-        Math.min(1, this.dist / this.current.sheet.span),
-        THREE.MathUtils.clamp((radius * this.radial.dot(_flumeBank)) / halfWidth, -1, 1),
+        along,
+        lateral,
         halfWidth,
         radius * (sheet.depth + sheet.depthG * _rider.g),
         flumeFlow(this.speed),
       );
+      this.readSheet(dt, flume, along, lateral);
     }
     flume.update(dt, this.clock.elapsed);
+  }
+
+  /**
+   * Read the flume's water back where the rider is sitting in it.
+   *
+   * The seat rides the surface, measured against the draft it settles to, so
+   * the crater the rider holds open under themselves is where they float and
+   * the chute running over it is what lifts and drops them. The tilt down the
+   * flume is taken over a baseline wider than that crater, so what pushes them
+   * is the water rather than the hole they are in. Both ease back to nothing
+   * for a rider who is not in a flume at all.
+   */
+  private readSheet(dt: number, flume: SheetField, along: number, lateral: number) {
+    if (along < 0) {
+      this.heave = expDamp(this.heave, 0, HEAVE_LAMBDA, dt);
+      this.sheetSlope = expDamp(this.sheetSlope, 0, HEAVE_LAMBDA, dt);
+      this.sheetFoam = 0;
+      return;
+    }
+    const span = this.current.sheet.span;
+    const here = flume.readAt(along, lateral, _sheet);
+    const level = here.x;
+    this.sheetFoam = here.z;
+    this.draft = expDamp(this.draft, level, DRAFT_LAMBDA, dt);
+    this.heave = THREE.MathUtils.clamp(
+      expDamp(this.heave, level - this.draft, HEAVE_LAMBDA, dt),
+      -HEAVE_MAX,
+      HEAVE_MAX,
+    );
+    const step = SHEET_BASELINE / (2 * span);
+    const ahead = flume.readAt(Math.min(1, along + step), lateral, _sheet).x;
+    const behind = flume.readAt(Math.max(0, along - step), lateral, _sheet).x;
+    this.sheetSlope = (ahead - behind) / SHEET_BASELINE;
   }
 
   /**

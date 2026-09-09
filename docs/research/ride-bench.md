@@ -152,3 +152,9 @@ is the same loop at the refresh rate.
 | 9.1, the hitch (Step 1) | pool | webgl | 184 (5.3) 77/53 | 139 (9.0) 241/31 |
 | 9.1, the hitch (Step 1) | handoff | webgpu | 188 (0.3) 1610/12 | 112 (1.0) 1597/8 |
 | 9.1, the hitch (Step 1) | handoff | webgl | 352 (3.1) 272/19 | 213 (5.2) 517/28 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | tube | webgpu | 346 (0.3) 121/15 | 208 (0.6) 216/9 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | tube | webgl | 362 (2.9) 155/55 | 158 (5.8) 1854/38 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | pool | webgpu | 227 (0.2) 112/10 | 133 (0.4) 164/6 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | pool | webgl | 186 (5.2) 71/48 | 128 (8.6) 206/44 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | handoff | webgpu | 194 (0.3) 1565/12 | 113 (0.5) 2482/5 |
+| 9.2-9.3, the swell and the flume read back (Steps 2-3) | handoff | webgl | 314 (3.2) 68/52 | 121 (6.1) 1851/38 |
