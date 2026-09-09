@@ -87,7 +87,9 @@ Phase 3 is complete.
 
 Open:
 
-- The splash is one impulse, a burst of droplets and eight raining drops.
+- A rider parked against the pool wall sees rock at point-blank range, which is
+  a featureless wash: the basin needs near-field detail or the paddle clamp
+  needs to hold them further off it.
 - The tube's film is a shading trick on a dry wall: no body, no leading edge.
 - Nothing in the pool flows; the current toward the mouths is painted dashes.
 - Progression undecided: depth counter only.
@@ -221,6 +223,16 @@ not. Hold 60 fps at 3440×1440 with MSAA on.
   compute kernel on the WebGL 2 backend reads its storage buffers back as zero:
   that tier had no height field at all, and now has the same one. `?foam=`
   scales it.
+
+- Step 3 (PR #22): the splash. A rider hitting the water presses a crater with
+  a crown standing around it, not a dome; the crater throws a column back up as
+  it closes, its collapse leaves a ring running for the wall, and drops rain
+  back over the next second. The wall reflects now — a neighbour outside the
+  pool reads back as the cell itself — so the ring comes home instead of being
+  absorbed by the rim. Droplets leave off the rim of the crown rather than from
+  a point, and the impact aerates the water it displaces, so the churn outlasts
+  the splash. Also: the water the floatie sits in is damped as well as sprung,
+  or the dish drives itself to the clamp.
 
 ### 6. Mobile (parked)
 

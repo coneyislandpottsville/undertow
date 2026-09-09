@@ -71,6 +71,10 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 5.2, foam the water carries (Step 2) | tube | webgl | 333 (2.8) | 212 (4.7) |
 | 5.2, foam the water carries (Step 2) | pool | webgpu | 149 (0.9) | 87 (1.6) |
 | 5.2, foam the water carries (Step 2) | pool | webgl | 147 (3.8) | 93 (3.1) |
+| 5.3, the splash (Step 3) | tube | webgpu | 337 (0.5) | 212 (0.9) |
+| 5.3, the splash (Step 3) | tube | webgl | 330 (2.8) | 211 (4.6) |
+| 5.3, the splash (Step 3) | pool | webgpu | 148 (0.5) | 86 (0.9) |
+| 5.3, the splash (Step 3) | pool | webgl | 148 (8.1) | 90 (6.7) |
 
 Notes:
 
@@ -161,6 +165,9 @@ Notes:
   had and its GPU time drops from 11.0 to 3.1 ms, because the transform-feedback path is gone;
   the extra render calls cost it CPU instead. Foam is a fourth channel of the same target, so it
   is one pass for both.
+
+- Build 5 Step 3 costs about 0.1 ms: the splash is the same field pass with a shaped impulse and
+  a schedule on the CPU, and the crown and column reuse the spray rig's spawn window.
 
 - Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
   twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution

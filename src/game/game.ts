@@ -66,6 +66,9 @@ const UNDER_FOV = 6;
 /** Bubbles a second at the head of the plume torn under at a splash, and how long it lasts. */
 const PLUNGE_BUBBLES = 6000;
 const PLUME_TIME = 1.1;
+/** Radius of the crater a rider punches into the pool, m, and drops raining back after. */
+const SPLASH_RADIUS = 2;
+const SPLASH_DROPS = 14;
 /** Bubbles a second off the rider while they are under. */
 const WAKE_BUBBLES = 1400;
 
@@ -206,9 +209,21 @@ export class Game {
   private raf = 0;
   private disposed = false;
   private whirlWall = 0;
-  /** Counts down after a splash, ringing the height field as droplets land. */
-  private dropTimer = -1;
-  private splashRain = 0;
+  /**
+   * What a splash does to the water, in order: the crater and its crown, the
+   * column thrown back up as it closes, the ring left when it collapses, and
+   * the droplets raining back down after. Seconds from the moment of impact.
+   */
+  private readonly splashPlan: {
+    at: number;
+    x: number;
+    z: number;
+    radius: number;
+    amplitude: number;
+    shape: number;
+    spray?: "crown" | "column";
+  }[] = [];
+  private splashClock = 0;
   /** Metres the seat is held below where it floats; a splash drives it, buoyancy returns it. */
   private plunge = 0;
   private plungeVel = 0;
@@ -779,6 +794,7 @@ export class Game {
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
     this.audio.splash();
+    this.planSplash(this.px, this.pz);
     // The rider goes under: whatever downward speed the flume left them with,
     // inside a band, so the splash is always a dunk and a fast one is deeper.
     this.plunge = 0;
@@ -788,12 +804,6 @@ export class Game {
       PLUNGE_MAX,
     );
     this.bubbleTime = PLUME_TIME;
-    this.poolSurface?.impulse(this.px, this.pz, 1.7, 0.5);
-    _tmp.set(this.px, this.current.pool.waterY + 0.2, this.pz);
-    this.spray?.splash(_tmp);
-    // The burst rains back down over the next second; ring each landing.
-    this.dropTimer = 0.1;
-    this.splashRain = 8;
     useHud.getState().patch({
       mode: "whirl",
       hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
@@ -842,6 +852,33 @@ export class Game {
     // Once the vortex has weakened, a rider at the rim can paddle out of it early.
     const bail = e < 0.5 && this.input.getThrottle() > 0.5 && this.whirlR > outerR - 1.0;
     if (this.whirlEnergy <= 0 || bail) this.enterPaddle(spin);
+  }
+
+  /**
+   * Write the splash into the water: a crater with a crown standing around it,
+   * a column out of the middle as the crater closes, the ring its collapse
+   * leaves running for the wall, and drops raining back over the next second.
+   */
+  private planSplash(x: number, z: number) {
+    const plan = this.splashPlan;
+    plan.length = 0;
+    this.splashClock = 0;
+    plan.push({ at: 0, x, z, radius: SPLASH_RADIUS, amplitude: 0.8, shape: 1, spray: "crown" });
+    plan.push({ at: 0.3, x, z, radius: 0.65, amplitude: 0.5, shape: 0, spray: "column" });
+    plan.push({ at: 0.62, x, z, radius: SPLASH_RADIUS * 0.8, amplitude: -0.2, shape: 1 });
+    for (let i = 0; i < SPLASH_DROPS; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = SPLASH_RADIUS * (0.6 + Math.random() * 2.2);
+      plan.push({
+        at: 0.45 + Math.random() * 0.9,
+        x: x + Math.cos(a) * r,
+        z: z + Math.sin(a) * r,
+        radius: 0.35,
+        amplitude: 0.05,
+        shape: 0,
+      });
+    }
+    plan.sort((a, b) => a.at - b.at);
   }
 
   private enterPaddle(spin: number) {
@@ -1093,17 +1130,19 @@ export class Game {
             1.2,
           );
     surface.setFloatie(this.px, this.pz, this.mode !== "slide", stir);
-    // Droplets from the splash raining back onto the pool. The particles live
-    // on the GPU, so the rings come from the same clock rather than a readback.
-    if (this.dropTimer >= 0) {
-      this.dropTimer -= dt;
-      if (this.dropTimer <= 0) {
-        this.dropTimer = this.splashRain > 0 ? 0.12 : -1;
-        if (this.splashRain > 0) {
-          this.splashRain -= 1;
-          const a = Math.random() * Math.PI * 2;
-          const r = Math.random() * 3.2;
-          surface.impulse(this.px + Math.cos(a) * r, this.pz + Math.sin(a) * r, 0.4, 0.035);
+    // The splash, in the order the water does it.
+    if (this.splashPlan.length) {
+      this.splashClock += dt;
+      const waterY = this.current.pool.waterY;
+      while (this.splashPlan.length && this.splashPlan[0]!.at <= this.splashClock) {
+        const e = this.splashPlan.shift()!;
+        surface.impulse(e.x, e.z, e.radius, e.amplitude, e.shape);
+        if (e.spray === "crown") {
+          _tmp.set(e.x, waterY + 0.2, e.z);
+          this.spray?.splash(_tmp, 1, e.radius);
+        } else if (e.spray === "column") {
+          _tmp.set(e.x, waterY + 0.1, e.z);
+          this.spray?.column(_tmp, 0.4, e.radius);
         }
       }
     }

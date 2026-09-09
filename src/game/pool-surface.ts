@@ -66,7 +66,7 @@ const SIGMA_MIN = 0.2;
 const SIGMA_MAX = 0.54;
 /** Field step: wave speed and per-step damping at 60 Hz. */
 const WAVE_C = 0.4;
-const WAVE_DAMP = 0.992;
+const WAVE_DAMP = 0.995;
 const STEP = 1 / 60;
 /** How deep the floatie presses the surface, m. */
 const DISH = 0.1;
@@ -110,11 +110,12 @@ const VISIBLE_MARGIN = 24;
  * kind of disturbance writes it, in coverage per second.
  */
 const FOAM_LIFE = 2.6;
-const FOAM_CHURN = 5;
+const FOAM_CHURN = 3.5;
 const FOAM_LIP = 1.2;
 const FOAM_WAKE = 0.35;
 const FOAM_INFLOW = 0.5;
 const FOAM_LAP = 0.7;
+const FOAM_SPLASH = 60;
 const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
 /** Never quite paints the water out: aerated water is still water. */
 const FOAM_MAX = 0.85;
@@ -207,8 +208,11 @@ export type PoolSurface = {
   waterLineAt: (x: number, z: number, energy: number, elapsed: number) => number;
   /** Tell the surface which side of itself the camera is on. */
   setUnder: (under: boolean) => void;
-  /** Ring a splash or a landing droplet into the height field, at world x/z. */
-  impulse: (x: number, z: number, radius: number, amplitude: number) => void;
+  /**
+   * Press a shape into the field at world x/z. `shape` 0 is the dome a drop
+   * leaves, 1 the crater and crown a body entering the water displaces.
+   */
+  impulse: (x: number, z: number, radius: number, amplitude: number, shape?: number) => void;
   /**
    * Where the rider's floatie presses the surface; `on` false lifts it out.
    * `stir` is how hard they are churning the water, which is what makes foam.
@@ -263,6 +267,8 @@ export function createPoolSurface(
   const uInflow = uniform(new THREE.Vector3(0, 0, 0));
   /** x, z, radius, amplitude of one splash or droplet, spent in a single step. */
   const uImpulse = uniform(new THREE.Vector4(0, 0, 0.7, 0));
+  /** 0 presses a dome into the water, 1 a crater with a raised rim. */
+  const uImpulseShape = uniform(0);
   /** 1 while the camera is under the water line. */
   const uUnder = uniform(0);
   const uAbsorb = uniform(0.55);
@@ -379,24 +385,38 @@ export function createPoolSurface(
     const uvNode = uv();
     const p = uvNode.sub(0.5).mul(PLANE_HALF * 2);
     const here = fieldAt(uvNode);
-    const west = fieldAt(uvNode.sub(vec2(TEXEL, 0))).x;
-    const east = fieldAt(uvNode.add(vec2(TEXEL, 0))).x;
-    const south = fieldAt(uvNode.sub(vec2(0, TEXEL))).x;
-    const north = fieldAt(uvNode.add(vec2(0, TEXEL))).x;
-
     const r = length(p);
-    // Waves die at the pool wall instead of reflecting off the edge of the field.
-    const inside = smoothstep(uRadius, uRadius.sub(1.2), r);
-    const lap = west.add(east).add(south).add(north).mul(0.25).sub(here.x);
+    // The wall reflects: a neighbour outside the pool reads back as this cell,
+    // which is a zero-gradient edge, so a ring runs out and comes back instead
+    // of being absorbed by the rim.
+    const neighbour = (offset: V2): F => {
+      const q = p.add(offset.mul(PLANE_HALF * 2));
+      return mix(here.x, fieldAt(uvNode.add(offset)).x, step(length(q), uRadius));
+    };
+    const lap = neighbour(vec2(-TEXEL, 0))
+      .add(neighbour(vec2(TEXEL, 0)))
+      .add(neighbour(vec2(0, -TEXEL)))
+      .add(neighbour(vec2(0, TEXEL)))
+      .mul(0.25)
+      .sub(here.x);
+    const inside = step(r, uRadius);
+    // A dome for a drop; for a body entering the water, the crater it displaces
+    // with the crown standing around it, which peaks a radius and a bit out.
     const dImp = length(p.sub(uImpulse.xy));
-    const imp = exp(dImp.mul(dImp).div(uImpulse.z.mul(uImpulse.z)).negate()).mul(uImpulse.w);
+    const q = dImp.div(uImpulse.z);
+    const dome = exp(q.mul(q).negate());
+    const crown = q.mul(q).mul(2).sub(1).mul(dome).mul(2.24);
+    const imp = mix(dome, crown, uImpulseShape).mul(uImpulse.w);
     // The floatie presses a shallow dish into the surface; as it moves the dish
-    // springs back and leaves a wake behind it.
+    // springs back and leaves a wake behind it. The water it is sitting in is
+    // damped as well as sprung, or the dish drives itself to the clamp and the
+    // rider ends up inside a standing wave.
     const dWake = length(p.sub(uWake.xy));
     const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
-    const spring = dish.sub(here.x).mul(0.12).mul(exp(dWake.mul(dWake).div(2).negate()));
+    const under = exp(dWake.mul(dWake).div(2).negate());
+    const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
     const vel = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
-    const height = here.x.add(vel).mul(inside).clamp(-1.5, 1.5);
+    const height = here.x.add(vel).mul(inside).clamp(-1.2, 1.2);
 
     // Foam drifts along the flow, so the spiral arms of a whirlpool are a ring
     // of foam at the lip being drawn out rather than a pattern painted in the
@@ -414,7 +434,10 @@ export function createPoolSurface(
     const lapping = smoothstep(uRadius.sub(1.8), uRadius.sub(0.2), r)
       .mul(waves(p).mul(6).add(0.25).max(0))
       .mul(FOAM_LAP);
-    const born = churn.add(lip).add(wake).add(inflow).add(lapping);
+    // Aeration at the impact itself, so a splash whitens before its own ripples
+    // have had time to churn the water.
+    const struck = abs(imp).mul(FOAM_SPLASH);
+    const born = churn.add(lip).add(wake).add(inflow).add(lapping).add(struck);
     const foam = carried.mul(FOAM_DECAY).add(born.mul(STEP)).clamp(0, 1).mul(inside);
 
     fieldMat.colorNode = vec4(height, vel, foam, 0).mul(uClear.oneMinus());
@@ -610,7 +633,7 @@ export function createPoolSurface(
   /** Field steps still owed to a pool the rig has just moved onto. */
   let priming = 0;
   let acc = 0;
-  const pending: THREE.Vector4[] = [];
+  const pending: { at: THREE.Vector4; shape: number }[] = [];
   const rgb = new THREE.Color();
   const rgbVec = new THREE.Vector3();
   const easeColor = (u: { value: THREE.Vector3 }, hex: number, t: number) => {
@@ -674,11 +697,17 @@ export function createPoolSurface(
     setUnder(under) {
       uUnder.value = under ? 1 : 0;
     },
-    impulse(x, z, radius, amplitude) {
+    impulse(x, z, radius, amplitude, shape = 0) {
       if (!pool || pending.length > 8) return;
-      pending.push(
-        new THREE.Vector4(x - pool.center.x, z - pool.center.z, Math.max(0.15, radius), amplitude),
-      );
+      pending.push({
+        at: new THREE.Vector4(
+          x - pool.center.x,
+          z - pool.center.z,
+          Math.max(0.15, radius),
+          amplitude,
+        ),
+        shape,
+      });
     },
     setFloatie(x, z, on, stir) {
       if (!pool) return;
@@ -709,8 +738,10 @@ export function createPoolSurface(
       let steps = 0;
       while (acc >= STEP && steps < 3) {
         const next = pending.shift();
-        if (next) uImpulse.value.copy(next);
-        else uImpulse.value.w = 0;
+        if (next) {
+          uImpulse.value.copy(next.at);
+          uImpulseShape.value = next.shape;
+        } else uImpulse.value.w = 0;
         stepField();
         acc -= STEP;
         steps++;
