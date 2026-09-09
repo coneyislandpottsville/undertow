@@ -115,3 +115,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 7.2, what the copy owes the game (Step 2) | tube | webgl | 327 (2.7) | 218 (4.3) |
 | 7.2, what the copy owes the game (Step 2) | pool | webgpu | 162 (0.4) | 106 (0.4) |
 | 7.2, what the copy owes the game (Step 2) | pool | webgl | 156 (5.0) | 102 (8.4) |
+| 7.3, the half of the water below the line (Step 3) | tube | webgpu | 355 (0.4) | 226 (0.6) |
+| 7.3, the half of the water below the line (Step 3) | tube | webgl | 329 (2.7) | 217 (4.4) |
+| 7.3, the half of the water below the line (Step 3) | pool | webgpu | 174 (0.3) | 106 (0.4) |
+| 7.3, the half of the water below the line (Step 3) | pool | webgl | 153 (5.1) | 99 (8.5) |

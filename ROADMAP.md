@@ -103,7 +103,10 @@ has its own sheet and its own body of water.
 Done in Build 7 (phase 7): the water, continued again. The ride is
 multisampled: it never was, because the post stack draws the scene into a
 render target of its own and `antialias: true` only reaches the canvas, and the
-stack pays for the four samples out of its own budget.
+stack pays for the four samples out of its own budget. The water shoves and
+tilts the rider as well as lifting them. And the pool's field has troughs: a
+node material clamps its colour output to zero, so the half of every wave below
+the still line had never been stored.
 
 Open:
 
@@ -118,10 +121,9 @@ Open:
   which the fourth channel has room for and nothing wants yet; or answer inside
   the frame that asked, so the game never sees an impulse it made until two
   frames later.
-- The pool surface reads one half of the ping-pong, which is the last step on an
-  even count and the one before it on an odd one. Following the latest step made
-  the two halves read as mirror images of each other; why was not established,
-  and pinning it, which is what Build 5 did, is what hides it.
+- The field's copy is 128 texels of height across 38 m and one request in
+  flight, so nothing the CPU reads from the water is finer than 30 cm or newer
+  than a frame or two.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand: `?theme=` and `?screen=` are the
   only ways to pick one.
@@ -361,6 +363,23 @@ MSAA on.
   flume pours the whole time it is there: the falling water pumps the patch it
   lands in, mean-zero, so rings leave the mouth and run out rather than a dent
   standing under it.
+
+- Step 3 (PR #35): the half of the water below the line. A node material clamps
+  its colour output to zero — three does it so render targets come out unsigned
+  — and the field is signed. It had never had a trough: no crater under a
+  splash, no dish under the floatie, no bottom to any wave, and a wave equation
+  with its negative half cut off cannot oscillate, so the field drifted up into
+  its clamp and stayed there. `fragmentNode` is the raw fragment and skips the
+  clamp. That is also what the ping-pong was: the two halves held two differently
+  clipped states, not mirror images, and with the trough back they agree, so the
+  surface reads whichever half the last step wrote.
+  With the other half of every wave back, the field carries about twice the
+  energy the old numbers were tuned against: the foam it throws is halved, the
+  water settles half again as fast, and it is pulled back to the still line so a
+  lift with no curvature in it has somewhere to go. The curvature is measured
+  around the water a cell is made of rather than around where it ended up, which
+  in the vortex is a different parcel and was feeding the field instead of
+  spreading it.
 
 ### 8. Mobile (parked)
 
