@@ -61,9 +61,9 @@ Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 9.2 ms of a 16.7 ms budget at 3440×1440 and the tube
-  phase 4.3, both with four samples. What is left in the post stack is the bloom
-  chain, twelve passes at a third of the frame.
+- The pool phase costs 9.0 ms of a 16.7 ms budget at 3440×1440 and the tube
+  phase 4.0, both with four samples. The post stack is four passes: the scene,
+  three for the glow, and the frame itself.
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
@@ -175,6 +175,14 @@ Hold 60 fps at 3440×1440 with MSAA on.
   now. With those gone the field is quiet between events, so the damping is a
   wave's life rather than a per-step number, and a crest breaks at the slope the
   steepest wave water can stand actually carries.
+
+- Step 3 (PR #40): the glow in three passes. The bloom addon's twelve — a high
+  pass, five levels of separable blur and a composite — cost three milliseconds
+  of a four millisecond frame, and cost the same at an eighth of the frame as at
+  a third: the price is the pass, not the pixels. The glow is three Gaussians
+  now, each over the last and each a quarter the size, summed in the pass that
+  was already drawing the frame. It still runs on the emissive channel alone, and
+  its targets are bytes because that channel is one.
 
 ### 8. Mobile (parked)
 

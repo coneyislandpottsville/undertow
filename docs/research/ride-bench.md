@@ -135,3 +135,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 8.2, the field's numbers (Step 2) | tube | webgl | 309 (3.0) | 202 (4.3) |
 | 8.2, the field's numbers (Step 2) | pool | webgpu | 173 (0.4) | 110 (0.4) |
 | 8.2, the field's numbers (Step 2) | pool | webgl | 142 (5.7) | 95 (9.2) |
+| 8.3, the glow in three passes (Step 3) | tube | webgpu | 384 (0.5) | 248 (0.7) |
+| 8.3, the glow in three passes (Step 3) | tube | webgl | 387 (2.5) | 228 (4.2) |
+| 8.3, the glow in three passes (Step 3) | pool | webgpu | 194 (0.2) | 111 (0.7) |
+| 8.3, the glow in three passes (Step 3) | pool | webgl | 207 (5.6) | 201 (9.4) |
