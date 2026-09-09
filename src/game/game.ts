@@ -4,9 +4,9 @@ import { RideAudio } from "./audio";
 import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
-import { createSprayMaterial, createWakeMaterial } from "./materials";
+import { createSprayMaterial } from "./materials";
 import { createRidePost, type RidePost } from "./post";
-import { createPoolSurface, type PoolSurface } from "./pool-surface";
+import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
@@ -45,8 +45,6 @@ const WHIRL_TIME = 7;
 const WHIRL_INNER = 3.2;
 /** Radial speed a full lean buys against the drain, m/s. */
 const WHIRL_LEAN = 3.2;
-const WAKE_COUNT = 24;
-const WAKE_LIFE = 1.6;
 
 function makeFrame() {
   return {
@@ -72,6 +70,7 @@ const _bodyUp = new THREE.Vector3();
 const _upProj = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _poolOut = new THREE.Vector3();
+const _riderLight = new THREE.Vector3();
 const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
@@ -101,6 +100,8 @@ export class Game {
   /** Bloom and zoom blur; null with `?post=0`, which renders the scene pass straight to the canvas. */
   private post: RidePost | null = null;
   private readonly postOn: boolean;
+  /** The URL knobs, kept for the surfaces that are built after the backend is up. */
+  private readonly query: URLSearchParams;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly input = new Input();
@@ -111,8 +112,12 @@ export class Game {
   private readonly riderLight: THREE.PointLight;
   private readonly cavern: THREE.Mesh;
   private readonly floatie: THREE.Mesh;
-  /** The one whirlpool funnel and pool surface, moved to the pool being ridden into. */
-  private readonly poolSurface: PoolSurface;
+  /**
+   * The one whirlpool funnel and pool surface, moved to the pool being ridden
+   * into. Built in start(), because which ripple tier it uses depends on the
+   * backend the renderer settled on.
+   */
+  private poolSurface: PoolSurface | null = null;
   /** Instanced sprite: one quad per droplet, centred on `sprayAttr`. */
   private readonly spray: THREE.Sprite;
   private readonly sprayAttr: THREE.InstancedBufferAttribute;
@@ -148,10 +153,6 @@ export class Game {
   /** 1 at the splash, 0 when the vortex has died; drains faster the tighter you ride. */
   private whirlEnergy = 0;
   private swirl = 0;
-  private readonly wake: THREE.Mesh[] = [];
-  private readonly wakeAge = new Float32Array(WAKE_COUNT).fill(-1);
-  private wakeNext = 0;
-  private wakeTimer = 0;
   private px = 0;
   private py = 0;
   private pz = 0;
@@ -184,6 +185,7 @@ export class Game {
     // otherwise; ?backend=webgl forces the fallback for testing. The backend
     // comes up asynchronously in start(); everything below is CPU-side setup.
     const query = new URLSearchParams(window.location.search);
+    this.query = query;
     const forceWebGL = query.get("backend") === "webgl";
     this.gpuTiming = query.has("gpu");
     this.postOn = query.get("post") !== "0";
@@ -258,25 +260,15 @@ export class Game {
     this.spray = new THREE.Sprite(createSprayMaterial(this.sprayAttr));
     this.spray.count = SPRAY_COUNT;
     this.spray.frustumCulled = false;
+    // After the pool surface (renderOrder 1) and its strips: the water is
+    // alpha-tested now, so anything drawn before it inside the pool is covered.
+    this.spray.renderOrder = 4;
     this.scene.add(this.spray);
-
-    const wakeGeo = new THREE.PlaneGeometry(1.4, 1.4);
-    for (let i = 0; i < WAKE_COUNT; i++) {
-      const quad = new THREE.Mesh(wakeGeo, createWakeMaterial());
-      quad.rotation.x = -Math.PI / 2;
-      quad.visible = false;
-      quad.frustumCulled = false;
-      this.scene.add(quad);
-      this.wake.push(quad);
-    }
-
-    this.poolSurface = createPoolSurface(this.scene);
 
     const pose = startPose();
     this.current = generateSection(this.worldSeed, pose.position, pose.dir, 0, true);
     this.scene.add(this.current.group);
     this.sections.push(this.current);
-    this.poolSurface.attach(this.current);
     this.dist = 2.4;
     this.speed = 0;
     samplePath(this.current.path, this.dist, _frame);
@@ -341,6 +333,12 @@ export class Game {
     this.api.backend = this.backend;
     this.api.ready = true;
     this.resize();
+    this.poolSurface = createPoolSurface(
+      this.renderer,
+      this.scene,
+      poolSurfaceOptions(this.query, this.backend),
+    );
+    this.poolSurface.attach(this.current);
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
     this.running = true;
     this.clock.prev = performance.now();
@@ -358,8 +356,7 @@ export class Game {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
-    for (const quad of this.wake) (quad.material as THREE.Material).dispose();
-    this.poolSurface.dispose();
+    this.poolSurface?.dispose();
     this.post?.dispose();
     if (this.initialized) this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
@@ -560,6 +557,7 @@ export class Game {
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
     this.audio.splash();
+    this.poolSurface?.impulse(this.px, this.pz, 1.7, 0.5);
     this.burst(70);
     useHud.getState().patch({
       mode: "whirl",
@@ -595,7 +593,7 @@ export class Game {
     this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
     // The rider sits on the funnel wall, so leaning in sinks them down the
     // throat as well as tightening the spiral.
-    this.py = pool.waterY + this.poolSurface.heightAt(this.whirlR, e) + 0.55;
+    this.py = pool.waterY + (this.poolSurface?.heightAt(this.whirlR, e) ?? 0) + 0.55;
     this.eye.set(this.px, this.py + 0.62, this.pz);
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
@@ -688,7 +686,10 @@ export class Game {
       if (radial > 0) this.speed *= 0.45;
     }
 
-    this.py = pool.waterY + this.poolSurface.heightAt(this.poolRadius(), this.whirlEnergy) + 0.55;
+    this.py =
+      pool.waterY +
+      (this.poolSurface?.heightAt(this.poolRadius(), this.whirlEnergy) ?? 0) +
+      0.55;
     this.eye.set(this.px, this.py + 0.58, this.pz);
   }
 
@@ -759,7 +760,7 @@ export class Game {
     this.sink = 0;
     this.drop += 1;
     this.whirlEnergy = 0;
-    this.poolSurface.attach(next);
+    this.poolSurface?.attach(next);
     this.trauma = Math.max(this.trauma, 0.28);
     this.fovPunch = 12;
     this.audio.whoosh();
@@ -800,10 +801,14 @@ export class Game {
     }
     this.updateCamera(dt);
     this.cavern.position.copy(this.camera.position);
-    this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
-    this.poolSurface.update(dt, this.clock.elapsed, THREE.MathUtils.clamp(this.whirlEnergy, 0, 1));
+    this.current.tick(
+      dt,
+      this.clock.elapsed,
+      this.mode === "slide" ? this.speed : 0,
+      THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
+    );
+    this.updatePoolSurface(dt);
     this.updateSpray(dt);
-    this.updateWake(dt);
     this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);
 
     this.hudTick += dt;
@@ -817,6 +822,24 @@ export class Game {
         g: this.mode === "slide" ? this.press / GRAVITY : 1,
       });
     }
+  }
+
+  /**
+   * Feed the pool surface: where the rider's lamp is for its specular lobe,
+   * where the floatie presses the height field, and the vortex's energy.
+   */
+  private updatePoolSurface(dt: number) {
+    const surface = this.poolSurface;
+    if (!surface) return;
+    this.riderLight.getWorldPosition(_riderLight);
+    surface.setRiderLight(_riderLight);
+    surface.setFloatie(this.px, this.pz, this.mode !== "slide");
+    surface.update(
+      dt,
+      this.clock.elapsed,
+      THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
+      this.camera.position,
+    );
   }
 
   private updateCamera(dt: number) {
@@ -861,7 +884,10 @@ export class Game {
         _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
         _look.set(
           pool.center.x - this.px,
-          pool.waterY + this.poolSurface.heightAt(this.whirlR * 0.3, e) + 0.5 - this.eye.y,
+          pool.waterY +
+            (this.poolSurface?.heightAt(this.whirlR * 0.3, e) ?? 0) +
+            0.5 -
+            this.eye.y,
           pool.center.z - this.pz,
         );
         if (_look.lengthSq() > 0.001) {
@@ -884,10 +910,11 @@ export class Game {
         _poolOut.set(this.px - pool.center.x, 0, this.pz - pool.center.z);
         if (_poolOut.lengthSq() > 1e-6) {
           _poolOut.normalize();
-          const slope = this.poolSurface.slopeAt(
-            this.whirlR,
-            THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
-          );
+          const slope =
+            this.poolSurface?.slopeAt(
+              this.whirlR,
+              THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
+            ) ?? 0;
           _camUp.set(-slope * _poolOut.x, 1, -slope * _poolOut.z).normalize();
         }
       }
@@ -914,40 +941,6 @@ export class Game {
 
     const bob = this.reducedMotion ? 0 : Math.sin(this.clock.elapsed * (6 + this.speed * 0.12)) * 0.012 * (this.speed / 20);
     this.camera.position.y += bob;
-  }
-
-  /** Soft ripples dropped behind the floatie while it moves across the pool. */
-  private updateWake(dt: number) {
-    const moving = this.mode === "paddle" && Math.abs(this.speed) > 1.2;
-    this.wakeTimer -= dt;
-    if (moving && this.wakeTimer <= 0) {
-      this.wakeTimer = 0.11;
-      const i = this.wakeNext;
-      this.wakeNext = (i + 1) % WAKE_COUNT;
-      const quad = this.wake[i]!;
-      const back = this.speed >= 0 ? 0.6 : -0.6;
-      quad.position.set(
-        this.px + Math.sin(this.yaw) * back,
-        this.current.pool.waterY + 0.05,
-        this.pz + Math.cos(this.yaw) * back,
-      );
-      quad.visible = true;
-      this.wakeAge[i] = 0;
-    }
-    for (let i = 0; i < WAKE_COUNT; i++) {
-      const age = this.wakeAge[i]!;
-      if (age < 0) continue;
-      const quad = this.wake[i]!;
-      if (age + dt > WAKE_LIFE) {
-        this.wakeAge[i] = -1;
-        quad.visible = false;
-        continue;
-      }
-      this.wakeAge[i] = age + dt;
-      const u = (age + dt) / WAKE_LIFE;
-      quad.scale.setScalar(1 + u * 1.8);
-      (quad.material as THREE.MeshBasicNodeMaterial).opacity = 0.34 * (1 - u) * (1 - u);
-    }
   }
 
   /** One-shot splash: throw spray up and out from the rider's position. */
@@ -980,6 +973,8 @@ export class Game {
     const emit = this.mode === "slide" && this.released && this.speed > 11;
     const cam = this.camera.position;
     const radius = this.current.path.radius;
+    const onWater = this.mode !== "slide";
+    const waterY = this.current.pool.waterY;
 
     for (let i = 0; i < SPRAY_COUNT; i++) {
       const age = this.sprayAge[i]!;
@@ -995,6 +990,10 @@ export class Game {
       const d2 = dx * dx + dy * dy + dz * dz;
       // A droplet on the lens reads as a blob; far ones are invisible anyway.
       if (age + dt > SPRAY_LIFE || d2 < 0.16 || d2 > 144) {
+        // A droplet dying over the pool lands on it: ring the height field.
+        if (onWater && arr[i3 + 1]! < waterY + 0.6) {
+          this.poolSurface?.impulse(arr[i3]!, arr[i3 + 2]!, 0.3, 0.05);
+        }
         this.sprayAge[i] = -1;
         arr[i3 + 1] = -1000;
       } else {

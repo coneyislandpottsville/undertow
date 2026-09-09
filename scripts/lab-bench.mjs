@@ -8,7 +8,8 @@
  *
  *   node scripts/lab-bench.mjs [--url http://127.0.0.1:8080] [--browser chrome|msedge|chromium]
  *        [--res 2560x1080,3440x1440] [--seconds 6] [--warm 2.5] [--only film,post]
- *        [--out docs/research/water-bench.json] [--md docs/research/water-bench.md] [--shots screenshots/lab]
+ *        [--query "reflect=0"] [--out docs/research/water-bench.json]
+ *        [--md docs/research/water-bench.md] [--shots screenshots/lab]
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -39,6 +40,8 @@ const only = args.only ? args.only.split(",") : null;
 const outJson = args.out ?? "docs/research/water-bench.json";
 const outMd = args.md ?? "docs/research/water-bench.md";
 const shots = args.shots ?? "";
+/** Extra query string appended to every case, for isolating one surface's cost. */
+const extraQuery = args.query ?? "";
 
 /** name, route, query, kind */
 const CASES = [
@@ -133,7 +136,7 @@ const gpu = await page.evaluate(async () => {
 const rows = [];
 for (const c of cases) {
   for (const r of resolutions) {
-    const url = `${base}${c.path}?${c.query}${c.query ? "&" : ""}res=${r.w}x${r.h}`;
+    const url = `${base}${c.path}?${c.query}${c.query ? "&" : ""}res=${r.w}x${r.h}${extraQuery ? `&${extraQuery}` : ""}`;
     await page.setViewportSize({ width: r.w, height: r.h });
     const errorsBefore = consoleErrors.length;
     const row = { name: c.name, backend: c.backend, res: r.label, w: r.w, h: r.h, url };
