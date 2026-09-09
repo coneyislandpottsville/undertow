@@ -225,6 +225,36 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   What is left is the build itself: the geometry lost `computeTangents`, which
   was two thirds of the sheet and less true than the ring's own frame.
 
+- Step 2: the pool's swell. It is analytic, so the pool's only permanent motion
+  cannot break, cannot carry foam, and a splash ring passes through it without
+  touching it. Into the field, the way the flume's chute chop is held.
+
+- Step 3: the flume's field, read back. The pool's field moves the rider; the
+  sheet's is seen and nothing else — the bow does not push, the chop does not
+  shake the seat, the audio does not know the water has gone white. The pool's
+  copy pass is the model, and its fourth channel is still free.
+
+- Step 4: the wall the water is seen through. The sheet's whole body is
+  `wallLook()`: the wall refracted by the ripples, absorbed by depth, and
+  mirrored back at grazing angles. It is being read through three hand-rolled
+  canvases, so that is the ceiling on how the water reads. Authored tileable
+  sets — albedo, normal, roughness, AO — sampled by the materials that already
+  sample canvases, and the procedural noise they replace comes out of the node
+  graphs.
+
+  With them, the theme's numbers and the flume's length and radius become
+  uniforms, so a section stops forking its own shaders and the set is one per
+  theme. That is what makes the compile finite, and most of `warm.ts` stops
+  earning its place — including on the WebGL 2 backend, where the warm-up does
+  not currently land at all. The hazard is that a material then outlives the
+  section that set it: the film's scroll, the rider's plough and the switch that
+  hands one sheet the flume's field are per-section state living on the
+  material, and a mouth's pulse is per-mouth. They move to an attribute or a
+  per-draw uniform first.
+
+  Chase the WebGL warm-up only if this leaves it standing. The screen art wants
+  authoring too, but that is themes as art and stays out.
+
 ### 10. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
