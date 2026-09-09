@@ -8,6 +8,7 @@ import { Input } from "./input";
 import { createRidePost, type RidePost } from "./post";
 import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
 import { createSpray, sprayOptions, type Spray } from "./spray";
+import { FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
@@ -27,14 +28,8 @@ const LIFT_MAX = 1.0;
 const SINK_MAX = 0.18;
 /** How far down the tube the camera peeks, m. */
 const LOOK_AHEAD = 6;
-const MIN_SPEED = 7;
-const MAX_SPEED = 46;
-const GRAVITY = 26;
-const FLOW = 5.2;
 const PADDLE_ACCEL = 18;
 const BRAKE_DRAG = 3.4;
-/** Quadratic drag: caps steep drops near MAX_SPEED without bleeding loops dry. */
-const QUAD_DRAG = 0.0085;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;

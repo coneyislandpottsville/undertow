@@ -35,8 +35,18 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 3.6, spray and mist (Step 6) | tube | webgl | 331 (2.9) | 224 (4.8) |
 | 3.6, spray and mist (Step 6) | pool | webgpu | 219 (1.2) | 129 (2.5) |
 | 3.6, spray and mist (Step 6) | pool | webgl | 245 (8.7) | 163 (6.0) |
+| 3.7, wet band on apparent g (Step 7) | tube | webgpu | 325 (0.4) | 198 (0.7) |
+| 3.7, wet band on apparent g (Step 7) | tube | webgl | 323 (3.1) | 220 (5.3) |
+| 3.7, wet band on apparent g (Step 7) | pool | webgpu | 220 (1.2) | 128 (3.6) |
+| 3.7, wet band on apparent g (Step 7) | pool | webgl | 245 (4.7) | 162 (6.2) |
 
 Notes:
+
+- Step 7 is free within noise: the wet band reads one more vertex attribute and swaps a
+  component for a dot product. The direction it carries is worked out on the CPU once per
+  section, at build time. Held at the mouth the frame is unchanged from step 6 (mean difference
+  0.1 of 255, 0.01% of pixels past the threshold): with no curvature, apparent gravity is
+  gravity.
 
 - Step 6 costs 0.5 ms (2560×1080) to 0.8 ms (3440×1440) of frame time in the tube, where the
   spray runs continuously above 11 m/s, and about the same in the pool. 24 000 droplets in two

@@ -78,6 +78,43 @@ function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+/**
+ * Write the film's `aDown` attribute: the direction water runs on this wall.
+ *
+ * TubeGeometry lays out `(tubular + 1) x (radial + 1)` vertices, ring by ring,
+ * sampling the curve by arc length, so one lookup per ring covers it.
+ */
+function addApparentDown(
+  geo: THREE.BufferGeometry,
+  tubular: number,
+  radial: number,
+  at: (u: number) => THREE.Vector3,
+) {
+  const perRing = radial + 1;
+  const data = new Float32Array((tubular + 1) * perRing * 3);
+  for (let i = 0; i <= tubular; i++) {
+    const d = at(i / tubular);
+    for (let j = 0; j < perRing; j++) {
+      const k = (i * perRing + j) * 3;
+      data[k] = d.x;
+      data[k + 1] = d.y;
+      data[k + 2] = d.z;
+    }
+  }
+  geo.setAttribute("aDown", new THREE.BufferAttribute(data, 3));
+}
+
+/** The path's apparent-gravity direction at a distance along it. */
+function sampleApparentDown(path: PathData, distance: number): THREE.Vector3 {
+  const i = THREE.MathUtils.clamp(
+    Math.round(distance / path.spacing),
+    0,
+    path.samples.length - 1,
+  );
+  return path.samples[i]!.apparentDown;
+}
 /** Cruising slope band (unit-vector y). Every feature starts from inside it. */
 const CRUISE_MIN = -0.34;
 const CRUISE_MAX = -0.1;
@@ -387,6 +424,8 @@ function addMouth(
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
   geo.computeTangents();
+  // A mouth is short and level: apparent gravity there is plain gravity.
+  addApparentDown(geo, 12, 10, () => DOWN);
   const mat = createMouthMaterial(palette, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -458,6 +497,7 @@ function assembleMeshes(
   // The film's normal map and anisotropy need per-vertex tangents; the
   // derivative fallback is skewed by the tube's long, thin uv parametrisation.
   tubeGeo.computeTangents();
+  addApparentDown(tubeGeo, tubular, 10, (u) => sampleApparentDown(path, u * path.length));
   const tubeMat = createTubeMaterial(palette, path.length, path.radius);
   const tube = new THREE.Mesh(tubeGeo, tubeMat);
   tube.frustumCulled = false;

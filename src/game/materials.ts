@@ -1,18 +1,22 @@
 import * as THREE from "three/webgpu";
 import {
   abs,
+  attribute,
   color,
+  dot,
   emissive,
   float,
   fract,
   mix,
   modelNormalMatrix,
+  modelWorldMatrix,
   mrt,
   normalLocal,
   normalMap,
   output,
   smoothstep,
   texture,
+  transformDirection,
   uniform,
   uv,
   vec2,
@@ -100,8 +104,14 @@ export function createTubeMaterial(
   const uFlow = uniform(0);
   const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
 
+  // Wetness follows apparent gravity, not the ground: `aDown` is the direction
+  // water runs on this stretch of wall, gravity plus the centrifugal push of
+  // speed² × curvature, baked per ring in generate.ts. At the top of a loop it
+  // points at the outer wall, which is where the rider is pressed and where the
+  // film actually sheets; before this the loop's roof was dry and its floor wet.
   const worldNormal = vertexStage(modelNormalMatrix.mul(normalLocal).normalize());
-  const wet = smoothstep(-0.15, 0.85, worldNormal.y.negate());
+  const down = vertexStage(transformDirection(attribute("aDown", "vec3"), modelWorldMatrix));
+  const wet = smoothstep(-0.15, 0.85, dot(worldNormal, down));
 
   // u runs along the tube, v around it. A whole number of ripple tiles around
   // the tube keeps the v seam invisible; layer B doubles that and stretches
