@@ -133,6 +133,13 @@ const FIELD_CATCHUP = 8;
  */
 const VORTEX_V = 5.5;
 const DRAIN_V = 1.2;
+/** Metres over which a mouth pulls the surface into it, and how fast at the lip. */
+const MOUTH_REACH = 20;
+const MOUTH_PULL = 1.1;
+/** What is left of that pull out in the middle of the pool, where every mouth is far. */
+const MOUTH_FAR = 0.55;
+/** Square metres the rider's drag spreads over. */
+const PUSH_SPREAD = 4;
 
 /** The open pool's waves, as `x` and `z` wavenumber, rate, and amplitude. */
 const SWELL: readonly (readonly [number, number, number, number])[] = [
@@ -142,6 +149,12 @@ const SWELL: readonly (readonly [number, number, number, number])[] = [
   [0.31, 0.24, 0.55, 0.04],
   [-0.21, 0.37, -0.41, 0.028],
 ];
+
+/** smoothstep from `edge0` down to `edge1`: 1 at or past `edge1`, 0 at `edge0`. */
+function smoothFall(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 /** The CPU twin of the wave sum, in metres about the still water line. */
 function swellAt(x: number, z: number, t: number): number {
@@ -208,6 +221,15 @@ export type PoolSurface = {
   waterLineAt: (x: number, z: number, energy: number, elapsed: number) => number;
   /** Tell the surface which side of itself the camera is on. */
   setUnder: (under: boolean) => void;
+  /** How hard the rider is dragging the water they are in, in m/s. */
+  setPush: (vx: number, vz: number) => void;
+  /**
+   * Where the pool's water is going at a world point, m/s: the vortex, the
+   * drain, and the pull of every mouth. The CPU twin of what advects the
+   * surface, so a rider adrift goes where the water they are floating on goes.
+   * The rider's own drag is left out of it: they do not push themselves.
+   */
+  currentAt: (x: number, z: number, energy: number, out: THREE.Vector2) => THREE.Vector2;
   /**
    * Press a shape into the field at world x/z. `shape` 0 is the dome a drop
    * leaves, 1 the crater and crown a body entering the water displaces.
@@ -265,6 +287,13 @@ export function createPoolSurface(
   const uWake = uniform(new THREE.Vector4());
   /** x, z of where the flume pours in, and how hard. */
   const uInflow = uniform(new THREE.Vector3(0, 0, 0));
+  /**
+   * The pool's mouths, as x, z and how hard each pulls the surface into it.
+   * A pool has two or three; a spare sits at zero strength.
+   */
+  const uExits = [0, 1, 2].map(() => uniform(new THREE.Vector3(0, 0, 0)));
+  /** How the rider is dragging the water they are in: x, z in m/s. */
+  const uPush = uniform(new THREE.Vector2());
   /** x, z, radius, amplitude of one splash or droplet, spent in a single step. */
   const uImpulse = uniform(new THREE.Vector4(0, 0, 0.7, 0));
   /** 0 presses a dome into the water, 1 a crater with a raised rim. */
@@ -318,7 +347,21 @@ export function createPoolSurface(
     const drain = uEnergy.mul(DRAIN_V).mul(smoothstep(uRadius, core.mul(0.6), r));
     // The rider orbits with increasing angle from +z toward +x, and the water
     // has to turn the same way or the vortex reads backwards.
-    return vec2(dir.y, dir.x.negate()).mul(swirl).sub(dir.mul(drain));
+    let flow: V2 = vec2(dir.y, dir.x.negate()).mul(swirl).sub(dir.mul(drain));
+    // The pool drains through its mouths, so the whole surface creeps toward
+    // them and hard in the last few metres.
+    for (const exit of uExits) {
+      const away = exit.xy.sub(p);
+      const d = length(away).max(0.5);
+      // Weighted down with distance as well, so the mouth a stretch of water is
+      // nearest to is the one that takes it and two of them do not cancel.
+      const share = float(MOUTH_REACH * MOUTH_REACH).div(d.mul(d).add(MOUTH_REACH * MOUTH_REACH));
+      const pull = smoothstep(MOUTH_REACH, 1.5, d).max(MOUTH_FAR).mul(share);
+      flow = flow.add(away.div(d).mul(exit.z).mul(pull));
+    }
+    // And the rider drags the water they are paddling through with them.
+    const dRider = length(p.sub(uWake.xy));
+    return flow.add(uPush.mul(exp(dRider.mul(dRider).div(PUSH_SPREAD).negate())));
   };
 
   /**
@@ -384,7 +427,10 @@ export function createPoolSurface(
   {
     const uvNode = uv();
     const p = uvNode.sub(0.5).mul(PLANE_HALF * 2);
-    const here = fieldAt(uvNode);
+    // Everything the water carries arrives from where the flow brought it: the
+    // height and the velocity that drives it as well as the foam, so a wake
+    // bends round the vortex and a ripple drifts toward a mouth.
+    const here = fieldAt(fieldUV(p.sub(flowAt(p).mul(STEP))));
     const r = length(p);
     // The wall reflects: a neighbour outside the pool reads back as this cell,
     // which is a zero-gradient edge, so a ring runs out and comes back instead
@@ -418,10 +464,10 @@ export function createPoolSurface(
     const vel = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
     const height = here.x.add(vel).mul(inside).clamp(-1.2, 1.2);
 
-    // Foam drifts along the flow, so the spiral arms of a whirlpool are a ring
-    // of foam at the lip being drawn out rather than a pattern painted in the
-    // shape of one.
-    const carried = fieldAt(fieldUV(p.sub(flowAt(p).mul(STEP)))).z;
+    // Foam is carried the same way, so the spiral arms of a whirlpool are a
+    // ring of foam at the lip being drawn out rather than a pattern painted in
+    // the shape of one.
+    const carried = here.z;
     const rho = r.div(uRadius);
     // The field only moves where something has hit it, so its own velocity is a
     // reading of how churned the water is.
@@ -671,6 +717,16 @@ export function createPoolSurface(
       setTheme(section.theme);
       uRadius.value = pool.radius;
       uInflow.value.set(pool.inflow.x - pool.center.x, pool.inflow.z - pool.center.z, 1);
+      for (let i = 0; i < uExits.length; i++) {
+        const exit = section.exits[i];
+        if (exit) {
+          uExits[i]!.value.set(
+            exit.position.x - pool.center.x,
+            exit.position.z - pool.center.z,
+            MOUTH_PULL,
+          );
+        } else uExits[i]!.value.set(0, 0, 0);
+      }
       uCenter.value.set(pool.center.x, pool.waterY, pool.center.z);
       mesh.position.set(pool.center.x, pool.waterY, pool.center.z);
       pending.length = 0;
@@ -696,6 +752,30 @@ export function createPoolSurface(
     },
     setUnder(under) {
       uUnder.value = under ? 1 : 0;
+    },
+    setPush(vx, vz) {
+      uPush.value.set(vx, vz);
+    },
+    currentAt(x, z, e, out) {
+      out.set(0, 0);
+      if (!pool) return out;
+      const px = x - pool.center.x;
+      const pz = z - pool.center.z;
+      const r = Math.max(0.05, Math.hypot(px, pz));
+      const core = pool.radius * (SIGMA_MIN + (SIGMA_MAX - SIGMA_MIN) * e);
+      const swirl = e * VORTEX_V * Math.min(r / core, core / r);
+      const drain = e * DRAIN_V * smoothFall(pool.radius, core * 0.6, r);
+      out.set((pz / r) * swirl - (px / r) * drain, (-px / r) * swirl - (pz / r) * drain);
+      for (const exit of uExits) {
+        const ax = exit.value.x - px;
+        const az = exit.value.y - pz;
+        const d = Math.max(0.5, Math.hypot(ax, az));
+        const share = (MOUTH_REACH * MOUTH_REACH) / (d * d + MOUTH_REACH * MOUTH_REACH);
+        const pull = exit.value.z * Math.max(MOUTH_FAR, smoothFall(MOUTH_REACH, 1.5, d)) * share;
+        out.x += (ax / d) * pull;
+        out.y += (az / d) * pull;
+      }
+      return out;
     },
     impulse(x, z, radius, amplitude, shape = 0) {
       if (!pool || pending.length > 8) return;

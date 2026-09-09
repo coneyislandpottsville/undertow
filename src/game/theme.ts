@@ -121,8 +121,6 @@ export type Theme = {
     lightPulse: number;
     /** Mouth interior emissive, in `accent`. */
     mouth: number;
-    /** Surface-current strip opacity. */
-    current: number;
   };
 
   light: {
@@ -210,7 +208,6 @@ const EXIT: Theme["exit"] = {
   light: 1.6,
   lightPulse: 1.6,
   mouth: 0.16,
-  current: 0.22,
 };
 
 const LIGHT: Theme["light"] = {
@@ -552,7 +549,7 @@ export const THEMES: readonly Theme[] = [
       drift: -6,
       tint: 0x50f0ff,
     },
-    exit: { ...EXIT, glow: 0.8, pulse: 1.8, mouth: 0.3, current: 0.3 },
+    exit: { ...EXIT, glow: 0.8, pulse: 1.8, mouth: 0.3 },
     light: {
       ...LIGHT,
       sky: 0x9a5ff0,

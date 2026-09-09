@@ -87,10 +87,6 @@ Phase 3 is complete.
 
 Open:
 
-- A rider parked against the pool wall sees rock at point-blank range, which is
-  a featureless wash: the basin needs near-field detail or the paddle clamp
-  needs to hold them further off it.
-- Nothing in the pool flows; the current toward the mouths is painted dashes.
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
 - The pool phase costs 10.5 ms of a 16.7 ms budget at 3440x1440. The basin's
@@ -243,6 +239,17 @@ not. Hold 60 fps at 3440×1440 with MSAA on.
   which is what makes the panels ripple down it. `aDepth` per vertex is what
   cuts the edge and thins the water. Droplets now leave along the line the
   rider ploughs, mostly off its two ends, and sideways as well as up.
+
+- Step 5 (PR #24): the water moves. One flow field — a Rankine vortex with its
+  drain, the pull of every mouth weighted so the nearest one takes a stretch of
+  water rather than two cancelling, and the drag of a paddling rider — advects
+  the whole field: the height and the velocity that drives it as well as the
+  foam, so a wake bends round the vortex and a ripple drifts into a mouth. A
+  CPU twin of it carries the rider, so hands off the keys the water takes them
+  to an exit instead of leaving them parked against the wall. The painted
+  current strips are retired: the surface itself shows where the pool is going.
+  Also: the basin's grain joins its relief in the last few metres, so rock at
+  point-blank range is not a featureless wash.
 
 ### 6. Mobile (parked)
 
