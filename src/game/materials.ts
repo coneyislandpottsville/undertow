@@ -5,7 +5,6 @@ import {
   emissive,
   float,
   fract,
-  instancedDynamicBufferAttribute,
   mix,
   modelNormalMatrix,
   mrt,
@@ -21,7 +20,7 @@ import {
   vertexStage,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import { rippleNormalCanvas, softDotCanvas, streakCanvas } from "./textures";
+import { rippleNormalCanvas, streakCanvas } from "./textures";
 
 /**
  * All ride materials live here so themed environments, animated maps, and
@@ -313,32 +312,4 @@ export function scrollCurrents(dt: number) {
   const tex = currentTexture();
   tex.offset.y = (((tex.offset.y - dt * 0.42) % 1) + 1) % 1;
   uClock.value += dt;
-}
-
-/**
- * Spray droplets. WebGPU draws point primitives at one pixel, so the particles
- * are an instanced Sprite whose centres come from `positions`; the material
- * sizes them like PointsMaterial did (size in world units, attenuated).
- */
-export function createSprayMaterial(positions: THREE.InstancedBufferAttribute): THREE.PointsNodeMaterial {
-  const mat = new THREE.PointsNodeMaterial({
-    color: 0xdff4f8,
-    map: softDotTexture(),
-    size: 0.09,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  mat.positionNode = instancedDynamicBufferAttribute(positions);
-  return mat;
-}
-
-let softDot: THREE.CanvasTexture | null = null;
-
-/** Radial-falloff sprite so a particle reads as mist at any distance, never a square. */
-export function softDotTexture(): THREE.CanvasTexture {
-  softDot ??= new THREE.CanvasTexture(softDotCanvas());
-  return softDot;
 }

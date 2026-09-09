@@ -89,22 +89,6 @@ export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLC
   return canvas;
 }
 
-/** Radial-falloff sprite, as in materials.ts. */
-export function softDotCanvas(size = 64): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const half = size / 2;
-  const g = ctx.createRadialGradient(half, half, 0, half, half, half);
-  g.addColorStop(0, "rgba(255,255,255,0.9)");
-  g.addColorStop(0.35, "rgba(255,255,255,0.4)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return canvas;
-}
-
 /** Checker with soft seams so refraction and absorption have something to bend. */
 export function floorCanvas(size = 512): HTMLCanvasElement {
   const canvas = document.createElement("canvas");

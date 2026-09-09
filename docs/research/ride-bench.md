@@ -31,8 +31,22 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 3.5, pool reflection and ripples (Step 5) | tube | webgl | 376 (2.7) | 248 (4.3) |
 | 3.5, pool reflection and ripples (Step 5) | pool | webgpu | 249 (1.3) | 145 (2.2) |
 | 3.5, pool reflection and ripples (Step 5) | pool | webgl | 276 (4.2) | 178 (6.5) |
+| 3.6, spray and mist (Step 6) | tube | webgpu | 325 (0.4) | 200 (0.7) |
+| 3.6, spray and mist (Step 6) | tube | webgl | 331 (2.9) | 224 (4.8) |
+| 3.6, spray and mist (Step 6) | pool | webgpu | 219 (1.2) | 129 (2.5) |
+| 3.6, spray and mist (Step 6) | pool | webgl | 245 (8.7) | 163 (6.0) |
 
 Notes:
+
+- Step 6 costs 0.5 ms (2560×1080) to 0.8 ms (3440×1440) of frame time in the tube, where the
+  spray runs continuously above 11 m/s, and about the same in the pool. 24 000 droplets in two
+  storage buffers, one kernel, drawn as one instanced sprite; the WebGL 2 backend runs the same
+  kernel through transform feedback. At 46 m/s the emitter throws about 9 100 droplets a second
+  with lives of 0.35 to 0.85 s, so roughly 5 500 are alive at once and the rest of the buffer is
+  headroom for the 900-droplet splash burst. 129 fps at 3440×1440 in the pool phase, twice the
+  60 fps budget. `?spray=0` removes the rig, `?spray=N` sets the count, `?spraysize=` the
+  droplet size. Bracketed GPU times on the tube rows understate the frame badly here — most of
+  the cost is sprite fill and it lands outside the timestamped pass.
 
 - Step 5 costs the pool phase about 40% of its frame rate: 145 fps at 3440×1440 on WebGPU,
   178 on the WebGL 2 tier, against a 60 fps budget. The bracketed GPU times understate it —

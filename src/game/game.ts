@@ -4,15 +4,14 @@ import { RideAudio } from "./audio";
 import { generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
-import { createSprayMaterial } from "./materials";
+
 import { createRidePost, type RidePost } from "./post";
 import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
+import { createSpray, sprayOptions, type Spray } from "./spray";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
 const FIXED = 1 / 60;
-const SPRAY_COUNT = 96;
-const SPRAY_LIFE = 0.75;
 const SIT = 1.05;
 /** Eye height above the seat, measured toward the tube axis. */
 const HEAD = 0.42;
@@ -118,14 +117,8 @@ export class Game {
    * backend the renderer settled on.
    */
   private poolSurface: PoolSurface | null = null;
-  /** Instanced sprite: one quad per droplet, centred on `sprayAttr`. */
-  private readonly spray: THREE.Sprite;
-  private readonly sprayAttr: THREE.InstancedBufferAttribute;
-  private readonly sprayVel: Float32Array;
-  private readonly sprayAge: Float32Array;
-  private sprayEmit = 0;
-  /** Fades after a splash so burst particles stay visible outside the tube. */
-  private sprayBurst = 0;
+  /** Spray and mist, simulated in compute; built in start() with the surface. */
+  private spray: Spray | null = null;
   /** Extra vertical FOV, degrees, punched on exit and decaying. */
   private fovPunch = 0;
   private strokeTimer = 0;
@@ -165,6 +158,9 @@ export class Game {
   private raf = 0;
   private disposed = false;
   private whirlWall = 0;
+  /** Counts down after a splash, ringing the height field as droplets land. */
+  private dropTimer = -1;
+  private splashRain = 0;
   /** False until the first click: the rider waits at the tube mouth. */
   private released = false;
   private readonly onResize = () => this.resize();
@@ -208,7 +204,15 @@ export class Game {
           h: canvas.height,
           drawCalls: this.renderer.info.render.drawCalls,
           triangles: this.renderer.info.render.triangles,
-          extra: { mode: this.mode, speed: this.speed, drop: this.drop },
+          extra: {
+            mode: this.mode,
+            speed: this.speed,
+            drop: this.drop,
+            // What the surfaces actually settled on, so a bench row records the
+            // tier it measured rather than the one it asked for.
+            ...this.poolSurface?.info(),
+            spray: this.spray?.info().count ?? 0,
+          },
         }),
       reset: () => this.meter.reset(),
     };
@@ -251,19 +255,6 @@ export class Game {
     this.floatie = new THREE.Mesh(floatGeo, floatMat);
     this.floatie.position.set(0, -0.78, -0.55);
     this.camera.add(this.floatie);
-
-    const sprayPos = new Float32Array(SPRAY_COUNT * 3);
-    this.sprayVel = new Float32Array(SPRAY_COUNT * 3);
-    this.sprayAge = new Float32Array(SPRAY_COUNT).fill(-1);
-    for (let i = 0; i < SPRAY_COUNT; i++) sprayPos[i * 3 + 1] = -1000;
-    this.sprayAttr = new THREE.InstancedBufferAttribute(sprayPos, 3);
-    this.spray = new THREE.Sprite(createSprayMaterial(this.sprayAttr));
-    this.spray.count = SPRAY_COUNT;
-    this.spray.frustumCulled = false;
-    // After the pool surface (renderOrder 1) and its strips: the water is
-    // alpha-tested now, so anything drawn before it inside the pool is covered.
-    this.spray.renderOrder = 4;
-    this.scene.add(this.spray);
 
     const pose = startPose();
     this.current = generateSection(this.worldSeed, pose.position, pose.dir, 0, true);
@@ -339,6 +330,8 @@ export class Game {
       poolSurfaceOptions(this.query, this.backend),
     );
     this.poolSurface.attach(this.current);
+    const spray = sprayOptions(this.query);
+    if (spray.count > 0) this.spray = createSpray(this.renderer, this.scene, spray);
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
     this.running = true;
     this.clock.prev = performance.now();
@@ -357,6 +350,7 @@ export class Game {
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
     this.poolSurface?.dispose();
+    this.spray?.dispose();
     this.post?.dispose();
     if (this.initialized) this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
@@ -558,7 +552,11 @@ export class Game {
     this.whirlWall = performance.now();
     this.audio.splash();
     this.poolSurface?.impulse(this.px, this.pz, 1.7, 0.5);
-    this.burst(70);
+    _tmp.set(this.px, this.current.pool.waterY + 0.2, this.pz);
+    this.spray?.splash(_tmp, this.current.palette);
+    // The burst rains back down over the next second; ring each landing.
+    this.dropTimer = 0.1;
+    this.splashRain = 8;
     useHud.getState().patch({
       mode: "whirl",
       hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
@@ -834,6 +832,20 @@ export class Game {
     this.riderLight.getWorldPosition(_riderLight);
     surface.setRiderLight(_riderLight);
     surface.setFloatie(this.px, this.pz, this.mode !== "slide");
+    // Droplets from the splash raining back onto the pool. The particles live
+    // on the GPU, so the rings come from the same clock rather than a readback.
+    if (this.dropTimer >= 0) {
+      this.dropTimer -= dt;
+      if (this.dropTimer <= 0) {
+        this.dropTimer = this.splashRain > 0 ? 0.12 : -1;
+        if (this.splashRain > 0) {
+          this.splashRain -= 1;
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 3.2;
+          surface.impulse(this.px + Math.cos(a) * r, this.pz + Math.sin(a) * r, 0.4, 0.035);
+        }
+      }
+    }
     surface.update(
       dt,
       this.clock.elapsed,
@@ -943,101 +955,23 @@ export class Game {
     this.camera.position.y += bob;
   }
 
-  /** One-shot splash: throw spray up and out from the rider's position. */
-  private burst(count: number) {
-    const positions = this.sprayAttr;
-    const arr = positions.array as Float32Array;
-    let spawned = 0;
-    for (let i = 0; i < SPRAY_COUNT && spawned < count; i++) {
-      if (this.sprayAge[i]! >= 0) continue;
-      const i3 = i * 3;
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.4 + Math.random() * 1.4;
-      arr[i3] = this.px + Math.cos(a) * r;
-      arr[i3 + 1] = this.py - 0.3;
-      arr[i3 + 2] = this.pz + Math.sin(a) * r;
-      const out = 2 + Math.random() * 5;
-      this.sprayVel[i3] = Math.cos(a) * out;
-      this.sprayVel[i3 + 1] = 2.5 + Math.random() * 5;
-      this.sprayVel[i3 + 2] = Math.sin(a) * out;
-      this.sprayAge[i] = 0;
-      spawned++;
-    }
-    positions.needsUpdate = true;
-    this.sprayBurst = 1;
-  }
-
+  /**
+   * Drive the spray rig. In the tube the emitter follows the film's contact
+   * with the wall under the rider, which is the seat's own radial: whatever
+   * apparent gravity presses them into is where the sheet is thickest and
+   * where droplets are thrown from.
+   */
   private updateSpray(dt: number) {
-    const positions = this.sprayAttr;
-    const arr = positions.array as Float32Array;
-    const emit = this.mode === "slide" && this.released && this.speed > 11;
-    const cam = this.camera.position;
-    const radius = this.current.path.radius;
-    const onWater = this.mode !== "slide";
-    const waterY = this.current.pool.waterY;
-
-    for (let i = 0; i < SPRAY_COUNT; i++) {
-      const age = this.sprayAge[i]!;
-      if (age < 0) continue;
-      const i3 = i * 3;
-      arr[i3]! += this.sprayVel[i3]! * dt;
-      arr[i3 + 1]! += this.sprayVel[i3 + 1]! * dt;
-      arr[i3 + 2]! += this.sprayVel[i3 + 2]! * dt;
-      this.sprayVel[i3 + 1]! -= 7 * dt;
-      const dx = arr[i3]! - cam.x;
-      const dy = arr[i3 + 1]! - cam.y;
-      const dz = arr[i3 + 2]! - cam.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      // A droplet on the lens reads as a blob; far ones are invisible anyway.
-      if (age + dt > SPRAY_LIFE || d2 < 0.16 || d2 > 144) {
-        // A droplet dying over the pool lands on it: ring the height field.
-        if (onWater && arr[i3 + 1]! < waterY + 0.6) {
-          this.poolSurface?.impulse(arr[i3]!, arr[i3 + 2]!, 0.3, 0.05);
-        }
-        this.sprayAge[i] = -1;
-        arr[i3 + 1] = -1000;
-      } else {
-        this.sprayAge[i] = age + dt;
-      }
+    const spray = this.spray;
+    if (!spray) return;
+    this.riderLight.getWorldPosition(_riderLight);
+    if (this.mode === "slide" && this.released) {
+      _tmp.copy(_frame.position).addScaledVector(this.radial, this.current.path.radius - 0.12);
+      spray.setTubeEmitter(_tmp, _frame.tangent, this.radial, _frame.binormal, this.speed);
+    } else {
+      spray.stopTube();
     }
-
-    this.sprayEmit = emit ? this.sprayEmit + (this.speed - 11) * 4.2 * dt : 0;
-    for (let i = 0; i < SPRAY_COUNT && this.sprayEmit >= 1; i++) {
-      if (this.sprayAge[i]! >= 0) continue;
-      this.sprayEmit -= 1;
-      const i3 = i * 3;
-      // Spray kicks off the wall where the floatie meets the water, just ahead
-      // of the rider, then streams back past the camera.
-      _tmp
-        .copy(_frame.position)
-        .addScaledVector(this.radial, radius - 0.12)
-        .addScaledVector(_frame.tangent, 0.8 + Math.random() * 1.6)
-        .addScaledVector(_frame.binormal, (Math.random() - 0.5) * 1.0);
-      arr[i3] = _tmp.x;
-      arr[i3 + 1] = _tmp.y;
-      arr[i3 + 2] = _tmp.z;
-      const along = this.speed * (0.45 + Math.random() * 0.2);
-      const lift = 1.4 + Math.random() * 2.6;
-      const drift = (Math.random() - 0.5) * 3;
-      _tmp
-        .copy(_frame.tangent)
-        .multiplyScalar(along)
-        .addScaledVector(this.radial, -lift)
-        .addScaledVector(_frame.binormal, drift);
-      this.sprayVel[i3] = _tmp.x;
-      this.sprayVel[i3 + 1] = _tmp.y;
-      this.sprayVel[i3 + 2] = _tmp.z;
-      this.sprayAge[i] = 0;
-    }
-    positions.needsUpdate = true;
-    this.sprayBurst = expDamp(this.sprayBurst, 0, 1.6, dt);
-    const mat = this.spray.material as THREE.PointsNodeMaterial;
-    const target = emit
-      ? THREE.MathUtils.clamp((this.speed - 11) / 26, 0, 0.85)
-      : this.sprayBurst > 0.03
-        ? 0.75 * this.sprayBurst
-        : 0;
-    mat.opacity = expDamp(mat.opacity, target, 6, dt);
+    spray.update(dt, _riderLight);
   }
 }
 
