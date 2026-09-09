@@ -93,10 +93,13 @@ export type Spray = {
    */
   setTheme: (theme: Theme, t?: number) => void;
   /**
-   * One-shot burst of droplets and a puff of mist at a world point.
-   * `strength` scales both, so a breach costs a fraction of a splash.
+   * One-shot crown of droplets off a ring of `radius`, and a puff of mist at a
+   * world point. `strength` scales both, so a breach costs a fraction of a
+   * splash.
    */
-  splash: (position: THREE.Vector3, strength?: number) => void;
+  splash: (position: THREE.Vector3, strength?: number, radius?: number) => void;
+  /** The column the crater throws back up: narrow, fast, straight. */
+  column: (position: THREE.Vector3, strength: number, radius: number) => void;
   /**
    * Ask for `count` bubbles this frame, spawned within `spread` metres of a
    * world point. They climb, wobble, and burst at the water line.
@@ -121,7 +124,7 @@ export function createSpray(
   /** First slot this frame's spawns land in, and how many of them there are. */
   const uCursor = uniform(0);
   const uCount = uniform(0);
-  /** 0 streams off the wall, 1 throws a burst up and out, 2 releases bubbles. */
+  /** 0 streams off the wall, 1 throws a crown, 2 releases bubbles, 3 a column. */
   const uKind = uniform(0);
   const uOrigin = uniform(new THREE.Vector3());
   const uTangent = uniform(new THREE.Vector3(0, 0, -1));
@@ -163,7 +166,20 @@ export function createSpray(
         const r1 = hash(seed);
         const r2 = hash(seed.add(uint(1)));
         const r3 = hash(seed.add(uint(2)));
-        If(uKind.greaterThan(1.5), () => {
+        If(uKind.greaterThan(2.5), () => {
+          // The column: what the crater throws straight back up as it closes.
+          const ang = r1.mul(Math.PI * 2);
+          const rad = r2.mul(r2).mul(uSpread);
+          s.assign(
+            vec4(
+              uOrigin.add(vec3(cos(ang).mul(rad), r3.mul(0.4), sin(ang).mul(rad))),
+              r2.mul(0.5).add(1),
+            ),
+          );
+          m.assign(
+            vec4(cos(ang).mul(rad).mul(1.4), r3.mul(5).add(9), sin(ang).mul(rad).mul(1.4), 0),
+          );
+        }).ElseIf(uKind.greaterThan(1.5), () => {
           // Bubbles: a column of air torn under with the rider, climbing back.
           const ang = r1.mul(Math.PI * 2);
           const rad = r2.mul(uSpread);
@@ -175,16 +191,18 @@ export function createSpray(
           );
           m.assign(vec4(cos(ang).mul(0.4), r2.mul(0.8).add(0.3), sin(ang).mul(0.4), 1));
         }).ElseIf(uKind.greaterThan(0.5), () => {
-          // Splash: up and out from the point of entry.
+          // The crown: thrown off the rim of the crater, so it leaves as a ring
+          // rather than a ball, and the further out it starts the faster it goes.
           const ang = r1.mul(Math.PI * 2);
-          const out = r2.mul(5).add(2);
+          const rad = uSpread.mul(r3.mul(0.35).add(0.75));
+          const out = rad.mul(2.1).add(1.2);
           s.assign(
             vec4(
-              uOrigin.add(vec3(cos(ang).mul(r3).mul(1.6), 0.1, sin(ang).mul(r3).mul(1.6))),
-              r2.mul(0.7).add(0.7),
+              uOrigin.add(vec3(cos(ang).mul(rad), r2.mul(0.3), sin(ang).mul(rad))),
+              r2.mul(0.7).add(0.8),
             ),
           );
-          m.assign(vec4(cos(ang).mul(out), r3.mul(6).add(3.5), sin(ang).mul(out), 0));
+          m.assign(vec4(cos(ang).mul(out), r3.mul(5).add(4.5), sin(ang).mul(out), 0));
         }).Else(() => {
           // Tube: off the wall just ahead of the rider, then back past them.
           const p = uOrigin
@@ -341,7 +359,11 @@ export function createSpray(
   let tubeSpeed = 0;
   let tubeOn = false;
   let burst = 0;
+  let burstKind = 1;
+  let burstSpread = 1.6;
   let bubbleWanted = 0;
+  const bubbleAt = new THREE.Vector3();
+  let bubbleSpread = 1;
   let mistLife = 0;
   const rgb = new THREE.Color();
   const rgbVec = new THREE.Vector3();
@@ -370,18 +392,26 @@ export function createSpray(
     },
     bubbles(position, spread, count) {
       if (count <= 0) return;
-      uOrigin.value.copy(position);
-      uSpread.value = spread;
+      bubbleAt.copy(position);
+      bubbleSpread = spread;
       bubbleWanted += count;
     },
     setWaterLine(y) {
       uWaterY.value = y;
     },
-    splash(position, strength = 1) {
+    splash(position, strength = 1, radius = 1.6) {
       burst = Math.round(BURST * strength);
+      burstKind = 1;
+      burstSpread = radius;
       uOrigin.value.copy(position);
       mistLife = MIST_LIFE * strength;
       uMist.value.set(position.x, position.y, position.z, 1);
+    },
+    column(position, strength, radius) {
+      burst = Math.round(BURST * strength);
+      burstKind = 3;
+      burstSpread = radius;
+      uOrigin.value.copy(position);
     },
     update(dt, riderLight) {
       frame++;
@@ -401,10 +431,13 @@ export function createSpray(
         count = Math.min(burst, N);
         burst = 0;
         carry = 0;
-        uKind.value = 1;
+        uKind.value = burstKind;
+        uSpread.value = burstSpread;
       } else if (bubbleWanted > 0) {
         count = Math.min(bubbleWanted, N);
         uKind.value = 2;
+        uOrigin.value.copy(bubbleAt);
+        uSpread.value = bubbleSpread;
       } else if (tubeOn) {
         carry += (tubeSpeed - SPEED_FLOOR) * RATE * uDt.value;
         count = Math.min(Math.floor(carry), N);
