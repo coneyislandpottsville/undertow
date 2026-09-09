@@ -131,3 +131,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 8.1, the sheet in the flume (Step 1) | tube | webgl | 312 (2.8) | 202 (4.1) |
 | 8.1, the sheet in the flume (Step 1) | pool | webgpu | 174 (0.2) | 108 (0.4) |
 | 8.1, the sheet in the flume (Step 1) | pool | webgl | 140 (5.8) | 94 (9.3) |
+| 8.2, the field's numbers (Step 2) | tube | webgpu | 338 (0.4) | 227 (0.6) |
+| 8.2, the field's numbers (Step 2) | tube | webgl | 309 (3.0) | 202 (4.3) |
+| 8.2, the field's numbers (Step 2) | pool | webgpu | 173 (0.4) | 110 (0.4) |
+| 8.2, the field's numbers (Step 2) | pool | webgl | 142 (5.7) | 95 (9.2) |
