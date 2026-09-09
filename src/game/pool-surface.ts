@@ -88,7 +88,16 @@ const IMPULSE_GAIN = 0.08;
 const MIRROR = 128;
 /** Field step: wave speed and per-step damping at 60 Hz. */
 const WAVE_C = 0.4;
-const WAVE_DAMP = 0.995;
+const WAVE_DAMP = 0.992;
+/**
+ * Per-step pull back to the still line.
+ *
+ * Damping the velocity does nothing to water that is standing still at the
+ * wrong level, and a lift with no curvature in it is invisible to the
+ * neighbours: whatever volume a splash or the flume leaves behind stays. This
+ * is the pool having somewhere for it to go.
+ */
+const LEVEL_DAMP = 0.997;
 const STEP = 1 / 60;
 /** How deep the floatie presses the surface, m. */
 const DISH = 0.1;
@@ -144,17 +153,19 @@ export const UNREFLECTED = 1;
  * kind of disturbance writes it, in coverage per second.
  */
 const FOAM_LIFE = 2.6;
-const FOAM_CHURN = 3.5;
+const FOAM_CHURN = 1.4;
 const FOAM_LIP = 1.2;
 const FOAM_WAKE = 0.35;
 const FOAM_INFLOW = 0.5;
 /**
- * The flume pours into the pool the whole time it is there. The falling water
- * pumps the surface under the mouth rather than pressing it: rings leave and
- * run out, and the water is never left with a dent it cannot fill.
+ * The flume pours into the pool the whole time it is there. The water under the
+ * mouth is held at what the fall is doing to it rather than kicked: a kick is
+ * integrated twice and finds whatever mode of the pool it is in tune with,
+ * which is a standing wave against the clamp. Metres it churns through, and the
+ * share of the way it is taken each step.
  */
-const INFLOW_PUMP = 0.014;
-const INFLOW_RATE = 7.6;
+const INFLOW_CHURN = 0.18;
+const INFLOW_GRIP = 0.05;
 const FOAM_LAP = 0.7;
 const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
@@ -494,14 +505,20 @@ export function createPoolSurface(
     // Everything the water carries arrives from where the flow brought it: the
     // height and the velocity that drives it as well as the foam, so a wake
     // bends round the vortex and a ripple drifts toward a mouth.
-    const here = fieldAt(fieldUV(p.sub(flowAt(p).mul(STEP))));
+    const src = p.sub(flowAt(p).mul(STEP));
+    const srcUV = fieldUV(src);
+    const here = fieldAt(srcUV);
     const r = length(p);
     // The wall reflects: a neighbour outside the pool reads back as this cell,
     // which is a zero-gradient edge, so a ring runs out and comes back instead
-    // of being absorbed by the rim.
+    // of being absorbed by the rim. The neighbours are taken around the water
+    // this cell is made of, not around where it ended up: a curvature measured
+    // between two different parcels of water is not a curvature, and in the
+    // vortex, where the two are furthest apart, it feeds the field instead of
+    // spreading it.
     const neighbour = (offset: V2): F => {
-      const q = p.add(offset.mul(PLANE_HALF * 2));
-      return mix(here.x, fieldAt(uvNode.add(offset)).x, step(length(q), uRadius));
+      const q = src.add(offset.mul(PLANE_HALF * 2));
+      return mix(here.x, fieldAt(srcUV.add(offset)).x, step(length(q), uRadius));
     };
     const lap = neighbour(vec2(-TEXEL, 0))
       .add(neighbour(vec2(TEXEL, 0)))
@@ -525,20 +542,21 @@ export function createPoolSurface(
     const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
     const under = exp(dWake.mul(dWake).div(2).negate());
     const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
-    // Water falling in off the flume, pumping the patch it lands in.
     const dIn = length(p.sub(uInflow.xy));
     const landing = exp(dIn.mul(dIn).div(3).negate()).mul(uInflow.z);
-    const pour = landing
-      .mul(sin(uTime.mul(INFLOW_RATE)).add(sin(uTime.mul(INFLOW_RATE * 0.63)).mul(0.6)))
-      .mul(INFLOW_PUMP);
-    const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).add(pour).mul(WAVE_DAMP);
-    const raw = here.x.add(moved);
+    const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
+    const raw = here.x.mul(LEVEL_DAMP).add(moved);
     const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
     // Whatever the limit took off the height comes off the velocity with it,
     // the way hitting a wall spends the speed that hit it. Kept, it would go on
     // pushing against a limit that cannot push back.
     const vel = moved.sub(raw.sub(limited));
-    const height = limited.mul(inside);
+    // Water falling in off the flume: the patch it lands in is held at what the
+    // fall is doing to it, and the rings leave because its neighbours take it up.
+    const stir = sin(uTime.mul(5.1))
+      .add(sin(uTime.mul(3.17).add(2)))
+      .mul(0.5 * INFLOW_CHURN);
+    const height = mix(limited, stir, landing.mul(INFLOW_GRIP)).mul(inside);
 
     // Foam is carried the same way, so the spiral arms of a whirlpool are a
     // ring of foam at the lip being drawn out rather than a pattern painted in
@@ -561,7 +579,11 @@ export function createPoolSurface(
     const born = churn.add(lip).add(wake).add(inflow).add(lapping).add(struck);
     const foam = carried.mul(FOAM_DECAY).add(born.mul(STEP)).clamp(0, 1).mul(inside);
 
-    fieldMat.colorNode = vec4(height, vel, foam, 0).mul(uClear.oneMinus());
+    // A node material's colour output is clamped to zero — three does it to
+    // keep render targets unsigned — and the field is signed: every trough,
+    // every crater, the dish under the floatie. `fragmentNode` is the raw
+    // fragment, so the water keeps the half of itself that is below the line.
+    fieldMat.fragmentNode = vec4(height, vel, foam, 0).mul(uClear.oneMinus());
   }
 
   const fieldQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), fieldMat);
@@ -570,12 +592,7 @@ export function createPoolSurface(
   fieldScene.add(fieldQuad);
   const fieldCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-  /**
-   * The field as everything downstream reads it: always the same half of the
-   * ping-pong, which is the last step on an even count and the one before it on
-   * an odd one. A sixtieth of a second of lag, alternating, and nothing sees the
-   * two halves disagree.
-   */
+  /** The field as everything downstream reads it: the half the last step wrote. */
   const uField = texture(rt[0].texture);
 
   /** Advance the field by one step, or wipe it. */
@@ -586,6 +603,7 @@ export function createPoolSurface(
     renderer.render(fieldScene, fieldCamera);
     renderer.setRenderTarget(null);
     read ^= 1;
+    uField.value = rt[read].texture;
   };
 
   /** The field as the surface reads it: height and foam at a plane point. */
