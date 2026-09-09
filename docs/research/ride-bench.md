@@ -123,3 +123,7 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 7.4, the wave that falls over (Step 4) | tube | webgl | 330 (2.7) | 218 (4.3) |
 | 7.4, the wave that falls over (Step 4) | pool | webgpu | 178 (0.3) | 105 (0.4) |
 | 7.4, the wave that falls over (Step 4) | pool | webgl | 146 (5.4) | 100 (8.6) |
+| 7.5, the water within reach (Step 5) | tube | webgpu | 360 (0.4) | 224 (0.6) |
+| 7.5, the water within reach (Step 5) | tube | webgl | 327 (2.8) | 217 (4.4) |
+| 7.5, the water within reach (Step 5) | pool | webgpu | 177 (0.3) | 105 (0.4) |
+| 7.5, the water within reach (Step 5) | pool | webgl | 152 (5.2) | 99 (8.6) |

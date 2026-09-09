@@ -472,10 +472,22 @@ export function createPoolSurface(
    * drifts under rather than a volume it evolves in: half the gradients, and
    * detail that travels the way water does instead of fizzing in place.
    */
-  const detail = (p: V2): F =>
-    sin(p.x.mul(2.6).sub(p.y.mul(2.1)).add(uTime.mul(2.9)))
+  const detail = (p: V2): F => {
+    // Two more ripples, a fifth of a metre across, for the water within a few
+    // metres of the eye — which is most of the screen in the pool and had
+    // nothing in it finer than a stride. They go out with distance, where a
+    // pixel covers more of one than the surface can hold still.
+    const near = smoothstep(10, 2.5, length(cameraPosition.sub(positionWorld)));
+    return sin(p.x.mul(2.6).sub(p.y.mul(2.1)).add(uTime.mul(2.9)))
       .mul(0.016)
-      .add(mx_noise_float(p.mul(1.4).add(vec2(uTime.mul(0.34), uTime.mul(-0.21)))).mul(0.014));
+      .add(mx_noise_float(p.mul(1.4).add(vec2(uTime.mul(0.34), uTime.mul(-0.21)))).mul(0.014))
+      .add(
+        sin(p.x.mul(21).sub(p.y.mul(15.4)).add(uTime.mul(6.2)))
+          .mul(0.0032)
+          .add(sin(p.x.mul(-12.7).sub(p.y.mul(24.1)).sub(uTime.mul(5.1))).mul(0.0026))
+          .mul(near),
+      );
+  };
 
   /** Forward-difference slope of `f` about `p`, in metres per metre. */
   const slopeOf = (f: (p: V2) => F, p: V2, eps: number): V2 => {
