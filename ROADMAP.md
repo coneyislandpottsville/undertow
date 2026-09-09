@@ -381,6 +381,11 @@ MSAA on.
   in the vortex is a different parcel and was feeding the field instead of
   spreading it.
 
+- Step 4 (PR #36): the wave that falls over. A crest steeper than the water can
+  stand on breaks and whitens along its own line, so a swell reads as a sea
+  rather than a rolling sheet. The slope it is judged by is the four neighbours
+  the curvature is already made of, so it costs two smoothsteps.
+
 ### 8. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
