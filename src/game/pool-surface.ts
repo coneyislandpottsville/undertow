@@ -148,6 +148,13 @@ const FOAM_CHURN = 3.5;
 const FOAM_LIP = 1.2;
 const FOAM_WAKE = 0.35;
 const FOAM_INFLOW = 0.5;
+/**
+ * The flume pours into the pool the whole time it is there. The falling water
+ * pumps the surface under the mouth rather than pressing it: rings leave and
+ * run out, and the water is never left with a dent it cannot fill.
+ */
+const INFLOW_PUMP = 0.014;
+const INFLOW_RATE = 7.6;
 const FOAM_LAP = 0.7;
 const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-1 / 60 / FOAM_LIFE);
@@ -260,6 +267,14 @@ export type PoolSurface = {
    * own splash and the ring off the wall carry them.
    */
   chopAt: (x: number, z: number, elapsed: number) => number;
+  /**
+   * Which way that water is tilted, as dh/dx and dh/dz. A float slides down it
+   * and sits square on it, so this is what lets a crown shove the rider and
+   * roll their horizon rather than only lift them.
+   */
+  chopSlopeAt: (x: number, z: number, elapsed: number, out: THREE.Vector2) => THREE.Vector2;
+  /** How broken the water is at a world point, 0 to 1: what the rider is sitting in. */
+  foamAt: (x: number, z: number) => number;
   /** The water line as a shader node, for rigs that need it per particle. */
   waterLineNode: (world: Node<"vec3">) => Node<"float">;
   /** Tell the surface which side of itself the camera is on. */
@@ -510,7 +525,13 @@ export function createPoolSurface(
     const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
     const under = exp(dWake.mul(dWake).div(2).negate());
     const spring = dish.sub(here.x).mul(0.12).sub(here.y.mul(0.22)).mul(under);
-    const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).mul(WAVE_DAMP);
+    // Water falling in off the flume, pumping the patch it lands in.
+    const dIn = length(p.sub(uInflow.xy));
+    const landing = exp(dIn.mul(dIn).div(3).negate()).mul(uInflow.z);
+    const pour = landing
+      .mul(sin(uTime.mul(INFLOW_RATE)).add(sin(uTime.mul(INFLOW_RATE * 0.63)).mul(0.6)))
+      .mul(INFLOW_PUMP);
+    const moved = here.y.add(lap.mul(WAVE_C)).add(imp).add(spring).add(pour).mul(WAVE_DAMP);
     const raw = here.x.add(moved);
     const limited = raw.clamp(-FIELD_CLAMP, FIELD_CLAMP);
     // Whatever the limit took off the height comes off the velocity with it,
@@ -529,8 +550,7 @@ export function createPoolSurface(
     const churn = abs(vel).mul(FOAM_CHURN);
     const lip = smoothstep(0.16, 0.02, abs(rho.sub(lipRho))).mul(uEnergy).mul(FOAM_LIP);
     const wake = exp(dWake.mul(dWake).div(1.6).negate()).mul(uWake.w).mul(FOAM_WAKE);
-    const dIn = length(p.sub(uInflow.xy));
-    const inflow = exp(dIn.mul(dIn).div(3).negate()).mul(uInflow.z).mul(FOAM_INFLOW);
+    const inflow = landing.mul(FOAM_INFLOW);
     // Water breaking against the wall, so the rim is never a clean edge.
     const lapping = smoothstep(uRadius.sub(1.8), uRadius.sub(0.2), r)
       .mul(waves(p).mul(6).add(0.25).max(0))
@@ -590,14 +610,12 @@ export function createPoolSurface(
   );
   const mirrorMat = new THREE.MeshBasicNodeMaterial();
   {
-    const q = uField
-      .sample(vec2(uv().x, mix(uv().y, uv().y.oneMinus(), uReadFlip)))
-      .x.add(FIELD_CLAMP)
-      .div(FIELD_CLAMP * 2)
-      .clamp(0, 1)
-      .mul(65535);
+    const cell = uField.sample(vec2(uv().x, mix(uv().y, uv().y.oneMinus(), uReadFlip)));
+    const q = cell.x.add(FIELD_CLAMP).div(FIELD_CLAMP * 2).clamp(0, 1).mul(65535);
     const high = q.div(256).floor();
-    mirrorMat.colorNode = vec4(high.div(255), q.sub(high.mul(256)).div(255), 0, 1);
+    // Height fills two channels; the third carries the foam, which the copy was
+    // already paying for and nothing was reading.
+    mirrorMat.colorNode = vec4(high.div(255), q.sub(high.mul(256)).div(255), cell.z, 1);
   }
   const mirrorRT = new THREE.RenderTarget(MIRROR, MIRROR, {
     depthBuffer: false,
@@ -627,8 +645,17 @@ export function createPoolSurface(
       });
   };
 
-  /** What the field is carrying at a plane point, m. Zero until the first read lands. */
-  const fieldHeight = (px: number, pz: number): number => {
+  /** Height in metres, from the two channels it is packed across. */
+  const heightTexel = (data: Uint8Array, i: number) =>
+    ((data[i]! * 256 + data[i + 1]!) / 65535) * (FIELD_CLAMP * 2) - FIELD_CLAMP;
+  const foamTexel = (data: Uint8Array, i: number) => data[i + 2]! / 255;
+
+  /** Bilinear read of the copy at a plane point. Zero until the first read lands. */
+  const sampleMirror = (
+    px: number,
+    pz: number,
+    decode: (data: Uint8Array, i: number) => number,
+  ): number => {
     const data = mirror;
     if (!data) return 0;
     const u = (px / (PLANE_HALF * 2) + 0.5) * MIRROR - 0.5;
@@ -640,13 +667,15 @@ export function createPoolSurface(
     const texel = (x: number, y: number) => {
       const cx = x < 0 ? 0 : x > MIRROR - 1 ? MIRROR - 1 : x;
       const cy = y < 0 ? 0 : y > MIRROR - 1 ? MIRROR - 1 : y;
-      const i = (cy * MIRROR + cx) * 4;
-      return ((data[i]! * 256 + data[i + 1]!) / 65535) * (FIELD_CLAMP * 2) - FIELD_CLAMP;
+      return decode(data, (cy * MIRROR + cx) * 4);
     };
     const lower = texel(x0, y0) + (texel(x0 + 1, y0) - texel(x0, y0)) * fx;
     const upper = texel(x0, y0 + 1) + (texel(x0 + 1, y0 + 1) - texel(x0, y0 + 1)) * fx;
     return lower + (upper - lower) * fy;
   };
+  const fieldHeight = (px: number, pz: number) => sampleMirror(px, pz, heightTexel);
+  /** One texel of the copy, m: the shortest baseline a slope can be taken over. */
+  const MIRROR_CELL = (PLANE_HALF * 2) / MIRROR;
 
   /**
    * World height of the surface over a world point, the way the shader sees it:
@@ -917,6 +946,25 @@ export function createPoolSurface(
       const dx = x - pool.center.x;
       const dz = z - pool.center.z;
       return swellAt(dx, dz, elapsed) + fieldHeight(dx, dz);
+    },
+    chopSlopeAt(x, z, elapsed, out) {
+      out.set(0, 0);
+      if (!pool) return out;
+      const dx = x - pool.center.x;
+      const dz = z - pool.center.z;
+      for (const [kx, kz, w, a] of SWELL) {
+        const c = Math.cos(dx * kx + dz * kz + elapsed * w) * a;
+        out.x += c * kx;
+        out.y += c * kz;
+      }
+      const h = MIRROR_CELL;
+      out.x += (fieldHeight(dx + h, dz) - fieldHeight(dx - h, dz)) / (2 * h);
+      out.y += (fieldHeight(dx, dz + h) - fieldHeight(dx, dz - h)) / (2 * h);
+      return out;
+    },
+    foamAt(x, z) {
+      if (!pool) return 0;
+      return sampleMirror(x - pool.center.x, z - pool.center.z, foamTexel);
     },
     waterLineNode,
     setUnder(under) {

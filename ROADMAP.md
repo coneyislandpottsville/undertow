@@ -113,8 +113,11 @@ Open:
   phase 4.4 ms, both with four samples. What is left in the post stack is the
   bloom chain, which is twelve passes at a third of the frame.
 - The field's copy is 128² over the pool, so the CPU sees the water at 30 cm and
-  a frame or two late. Enough for a water line and a float; not enough to read a
-  droplet's landing or to put anything small on the surface.
+  a frame or two late, and it carries height and foam. What it cannot do: read a
+  droplet's landing, which is smaller than a texel; carry the field's velocity,
+  which the fourth channel has room for and nothing wants yet; or answer inside
+  the frame that asked, so the game never sees an impulse it made until two
+  frames later.
 - The pool surface reads one half of the ping-pong, which is the last step on an
   even count and the one before it on an odd one. Following the latest step made
   the two halves read as mirror images of each other; why was not established,
@@ -348,6 +351,16 @@ MSAA on.
   blurring their sum meant writing the sum out first, to smear something already
   soft. Pool 99 to 105 fps at 3440×1440 on WebGPU, tube 207 to 226, with four
   samples where there were none.
+
+- Step 2 (PR #34): what the copy owes the game. It owes slope, and slope is
+  four more reads of the copy that is already there: a float on tilted water
+  slides down it and sits square on it, so the swell and whatever the field is
+  carrying now shove the rider and roll their horizon instead of only lifting
+  them. The copy's third channel was empty, so it carries the foam as well, and
+  the hiss the rider hears is the water they are actually sitting in. And the
+  flume pours the whole time it is there: the falling water pumps the patch it
+  lands in, mean-zero, so rings leave the mouth and run out rather than a dent
+  standing under it.
 
 ### 8. Mobile (parked)
 

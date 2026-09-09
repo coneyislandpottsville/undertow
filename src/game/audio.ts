@@ -113,8 +113,12 @@ export class RideAudio {
     this.master.gain.setTargetAtTime(0.55 * (1 - 0.3 * amount), t, 0.06);
   }
 
-  /** Continuous bed. `spin` is the whirlpool's angular rate in rad/s, else 0. */
-  update(speed: number, mode: Mode, spin = 0) {
+  /**
+   * Continuous bed. `spin` is the whirlpool's angular rate in rad/s, else 0;
+   * `churn` is how broken the water under the rider is, 0 to 1, which is the
+   * hiss they hear when they are sitting in their own splash.
+   */
+  update(speed: number, mode: Mode, spin = 0, churn = 0) {
     if (!this.ctx || !this.rumble || !this.hiss || !this.roar || !this.under) return;
     const t = this.ctx.currentTime;
     const v = clamp(Math.abs(speed) / 44, 0, 1);
@@ -122,11 +126,11 @@ export class RideAudio {
     const sliding = mode === "slide";
     const paddling = mode === "paddle";
     const rumbleGain = sliding ? 0.05 + v * 0.35 : paddling ? 0.02 + p * 0.06 : 0.04;
-    const hissGain = sliding ? v * v * 0.28 : paddling ? p * 0.05 : 0.02;
+    const hissGain = sliding ? v * v * 0.28 : (paddling ? p * 0.05 : 0.02) + churn * 0.14;
     this.rumble.gain.gain.setTargetAtTime(rumbleGain, t, 0.08);
     this.rumble.filter.frequency.setTargetAtTime(160 + v * 340, t, 0.1);
     this.hiss.gain.gain.setTargetAtTime(hissGain, t, 0.08);
-    this.hiss.filter.frequency.setTargetAtTime(900 + v * 2600, t, 0.12);
+    this.hiss.filter.frequency.setTargetAtTime(900 + v * 2600 + churn * 900, t, 0.12);
     const whirl = mode === "whirl";
     const s = clamp(spin / 3.6, 0, 1);
     const roarGain = whirl ? 0.12 + s * 0.18 : 0;
