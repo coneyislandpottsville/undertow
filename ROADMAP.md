@@ -74,11 +74,9 @@ Open:
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
-- Played at the refresh rate a fifty-second run drops fifteen to eighteen frames
-  past 20 ms at either resolution, and they are three long tasks: about 250 ms
-  and 205 ms, one nine seconds into each flume at full speed, and 70 ms at the
-  splash after. The build a section is spread over frames still has one lump in
-  it. Build 9.1 left this standing rather than removing it.
+- Played at the refresh rate a fifty-second run drops one frame past 20 ms at
+  either resolution, at the instant the rider is let go, and it is the page's
+  first DOM raster in the GPU process rather than the ride.
 - The pool's field is 256 texels across 38 m, so the pool carries nothing shorter
   than about 60 cm; below that the surface's own detail is a shading trick, not
   water that moves. Its copy for the CPU is 128 texels, so nothing the game reads
@@ -280,7 +278,24 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   scatter of bubbles a patch closes up as it aerates is read at two scales that
   do not come back round together inside a pool.
 
-- Step 5: the finite shader set. A material still bakes its theme, its flume's
+- Step 5 (PR #46): the lump. Three long tasks a run — 250 ms and 205 ms nine
+  seconds into each flume, 70 ms at the splash after — were one bug. A shader is
+  cached against the render context it was built for, and a context is keyed
+  partly on how deep in nested renders it is; the reflection's warm-up asked the
+  virtual camera its own depth, and a camera has one only once it has drawn. The
+  first reflection is the draw that teaches it, and that draw is the whole
+  scene's shaders at once. The reflection is a render inside the pass that draws
+  the scene, so the depth is that pass's plus one, and a section is warm before
+  its pool is ever seen. `compileAsync` calls `scene.onBeforeRender` from outside
+  any render, where the depth is -1, so only real draws are recorded now.
+
+  Played at the refresh rate: frames over 20 ms fall from fifteen to one at
+  1600×900 and to one at 3440×1440, and not one node graph is built after the
+  rider is released. What is left is a single 40 ms frame at the instant of
+  release, and it is the page's first DOM raster in the GPU process rather than
+  anything the ride does.
+
+- Step 6: the finite shader set. A material still bakes its theme, its flume's
   length and its radius in as constants, so no two sections share a shader.
   Those become uniforms and the set is one per theme, which is what makes the
   compile finite and stops most of `warm.ts` earning its place — including on
