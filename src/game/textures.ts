@@ -116,3 +116,189 @@ export function floorCanvas(size = 512): HTMLCanvasElement {
   }
   return canvas;
 }
+
+/** The pattern a theme's tube panels carry. */
+export type ScreenArt = "shoal" | "motes" | "fronds" | "cracks" | "strata" | "grid";
+
+/**
+ * Art for the tube interior, drawn white on transparent so the material tints
+ * it. x wraps around the tube, so anything drawn across it reads as a ring and
+ * anything drawn down y streams past the rider; every pattern is seeded and
+ * tiles in x.
+ */
+export function screenCanvas(art: ScreenArt, size = 512): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const rng = new Rng(1013 + art.length * 977);
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "#fff";
+  /** Draw once, then again a tile to each side, so the pattern wraps in x. */
+  const wrapped = (draw: () => void) => {
+    for (const dx of [-size, 0, size]) {
+      ctx.save();
+      ctx.translate(dx, 0);
+      draw();
+      ctx.restore();
+    }
+  };
+  switch (art) {
+    case "shoal":
+      for (let i = 0; i < 62; i++) {
+        const x = rng.float() * size;
+        const y = rng.float() * size;
+        const s = rng.range(7, 22);
+        const flip = rng.sign();
+        const a = rng.range(0.35, 0.95);
+        wrapped(() => {
+          ctx.globalAlpha = a;
+          ctx.beginPath();
+          ctx.ellipse(x, y, s, s * 0.42, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(x - flip * s * 0.7, y);
+          ctx.lineTo(x - flip * s * 1.8, y - s * 0.55);
+          ctx.lineTo(x - flip * s * 1.8, y + s * 0.55);
+          ctx.closePath();
+          ctx.fill();
+        });
+      }
+      break;
+    case "motes":
+      for (let i = 0; i < 260; i++) {
+        const x = rng.float() * size;
+        const y = rng.float() * size;
+        const r = rng.range(1.5, 5);
+        const a = rng.range(0.3, 1);
+        wrapped(() => {
+          const g = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+          g.addColorStop(0, `rgba(255,255,255,${a})`);
+          g.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(x, y, r * 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      for (let i = 0; i < 7; i++) {
+        const x = rng.float() * size;
+        const y = rng.float() * size;
+        const r = rng.range(24, 56);
+        wrapped(() => {
+          ctx.globalAlpha = 0.5;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#fff";
+          ctx.beginPath();
+          ctx.arc(x, y, r, Math.PI, Math.PI * 2);
+          ctx.stroke();
+          for (let k = 0; k < 5; k++) {
+            ctx.beginPath();
+            ctx.moveTo(x - r + (k * r) / 2, y);
+            ctx.lineTo(x - r * 0.7 + (k * r) / 2, y + r * 1.6);
+            ctx.stroke();
+          }
+        });
+      }
+      break;
+    case "fronds":
+      ctx.lineCap = "round";
+      for (let i = 0; i < 46; i++) {
+        const x = rng.float() * size;
+        const sway = rng.range(14, 46);
+        const phase = rng.float() * Math.PI * 2;
+        const w = rng.range(3, 11);
+        const a = rng.range(0.25, 0.8);
+        wrapped(() => {
+          ctx.globalAlpha = a;
+          ctx.lineWidth = w;
+          ctx.beginPath();
+          for (let y = 0; y <= size; y += 16) {
+            const px = x + Math.sin(y * 0.018 + phase) * sway;
+            if (y === 0) ctx.moveTo(px, y);
+            else ctx.lineTo(px, y);
+          }
+          ctx.stroke();
+        });
+      }
+      break;
+    case "cracks":
+      ctx.lineCap = "round";
+      for (let i = 0; i < 24; i++) {
+        const x0 = rng.float() * size;
+        const y0 = rng.float() * size;
+        const steps = rng.int(6, 14);
+        const seg = rng.range(18, 40);
+        let ang = rng.float() * Math.PI * 2;
+        const pts: [number, number][] = [[x0, y0]];
+        for (let k = 0; k < steps; k++) {
+          ang += rng.range(-0.7, 0.7);
+          const [px, py] = pts[pts.length - 1]!;
+          pts.push([px + Math.cos(ang) * seg, py + Math.sin(ang) * seg]);
+        }
+        const a = rng.range(0.4, 1);
+        const w = rng.range(1.5, 5);
+        wrapped(() => {
+          ctx.globalAlpha = a;
+          ctx.lineWidth = w;
+          ctx.beginPath();
+          ctx.moveTo(pts[0]![0], pts[0]![1]);
+          for (const [px, py] of pts.slice(1)) ctx.lineTo(px, py);
+          ctx.stroke();
+        });
+      }
+      break;
+    case "strata":
+      for (let i = 0; i < 16; i++) {
+        const y = rng.float() * size;
+        const h = rng.range(6, 34);
+        const a = rng.range(0.15, 0.6);
+        const g = ctx.createLinearGradient(0, y, 0, y + h);
+        g.addColorStop(0, "rgba(255,255,255,0)");
+        g.addColorStop(0.5, `rgba(255,255,255,${a})`);
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, y, size, h);
+      }
+      for (let i = 0; i < 120; i++) {
+        const x = rng.float() * size;
+        const y = rng.float() * size;
+        const r = rng.range(2, 9);
+        const a = rng.range(0.2, 0.7);
+        wrapped(() => {
+          ctx.globalAlpha = a;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      break;
+    case "grid": {
+      const cells = 8;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i <= cells; i++) {
+        const p = (i * size) / cells;
+        ctx.beginPath();
+        ctx.moveTo(p, 0);
+        ctx.lineTo(p, size);
+        ctx.moveTo(0, p);
+        ctx.lineTo(size, p);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      for (let i = 0; i <= cells; i++) {
+        for (let j = 0; j <= cells; j++) {
+          if (!rng.chance(0.28)) continue;
+          ctx.beginPath();
+          ctx.arc((i * size) / cells, (j * size) / cells, rng.range(4, 9), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      break;
+    }
+  }
+  return canvas;
+}

@@ -55,8 +55,17 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 4.4, cross-fade at exits (Step 4) | tube | webgl | 333 (2.9) | 212 (4.6) |
 | 4.4, cross-fade at exits (Step 4) | pool | webgpu | 160 (1.6) | 91 (3.3) |
 | 4.4, cross-fade at exits (Step 4) | pool | webgl | 161 (6.6) | 102 (14.1) |
+| 4.5, the tube as a screen (Step 5) | tube | webgpu | 343 (0.5) | 220 (0.9) |
+| 4.5, the tube as a screen (Step 5) | tube | webgl | 331 (2.8) | 210 (4.9) |
+| 4.5, the tube as a screen (Step 5) | pool | webgpu | 159 (1.4) | 95 (1.8) |
+| 4.5, the tube as a screen (Step 5) | pool | webgl | 160 (6.9) | 102 (11.6) |
 
 Notes:
+
+- Build 4 step 5 costs one texture sample and about ten instructions on every tube and
+  mouth pixel, which is inside run-to-run noise at these frame rates. The art is six
+  512x512 canvases, drawn once each on first use and only for the themes a run visits.
+  `?screen=<url>` swaps every panel for an image or, on a video extension, a VideoTexture.
 
 - Build 4 step 4 is free: the cross-fade is a handful of colour and scalar lerps once a
   frame, and only while a fade is running. `?fade=` sets its length in seconds; `?fade=0`

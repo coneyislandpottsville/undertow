@@ -5,6 +5,7 @@ import { exitSeed, generateSection, startPose, type RideSection } from "./genera
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
+import { setScreenSource } from "./materials";
 import { createRidePost, type RidePost } from "./post";
 import { createPoolSurface, poolSurfaceOptions, type PoolSurface } from "./pool-surface";
 import { createSpray, sprayOptions, type Spray } from "./spray";
@@ -285,6 +286,7 @@ export class Game {
 
     const pose = startPose();
     pinTheme(query.get("theme"));
+    setScreenSource(query.get("screen"));
     this.current = generateSection(
       this.worldSeed,
       pose.position,

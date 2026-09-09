@@ -1,3 +1,5 @@
+import type { ScreenArt } from "./textures";
+
 /**
  * A theme is what a section looks like: colours, plus the material, lighting
  * and fog parameters every surface reads. Defined here, read in exactly two
@@ -74,6 +76,22 @@ export type Theme = {
     gloss: number;
   };
 
+  /** What the tube interior shows: the art it carries, and how. */
+  screen: {
+    art: ScreenArt;
+    /** Metres of tube between panels, and the share of that one fills. */
+    pitch: number;
+    fill: number;
+    /** Copies of the art around the tube. */
+    wrap: number;
+    /** How brightly it reads on the wall, and how much of that blooms. */
+    strength: number;
+    glow: number;
+    /** Metres per second the panels drift along the tube. */
+    drift: number;
+    tint: number;
+  };
+
   exit: {
     /** Ring emissive at the trough of its pulse, and the swing above it. */
     glow: number;
@@ -142,6 +160,17 @@ const POOL: Theme["pool"] = {
   gloss: 260,
 };
 
+const SCREEN: Theme["screen"] = {
+  art: "shoal",
+  pitch: 16,
+  fill: 0.32,
+  wrap: 3,
+  strength: 0.5,
+  glow: 0.28,
+  drift: 3,
+  tint: 0xd6f2ea,
+};
+
 const EXIT: Theme["exit"] = {
   glow: 0.5,
   pulse: 1.3,
@@ -179,6 +208,7 @@ export const THEMES: readonly Theme[] = [
     ring: 0xd6f2ea,
     film: FILM,
     pool: POOL,
+    screen: SCREEN,
     exit: EXIT,
     light: LIGHT,
     fogDensity: 0.01,
@@ -210,6 +240,17 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.34,
       foam: 0.5,
       gloss: 400,
+    },
+    screen: {
+      ...SCREEN,
+      art: "motes",
+      pitch: 20,
+      fill: 0.4,
+      wrap: 3,
+      strength: 0.45,
+      glow: 0.5,
+      drift: -1.4,
+      tint: 0x9fd8ff,
     },
     exit: { ...EXIT, glow: 0.6, pulse: 1.6 },
     light: {
@@ -257,6 +298,17 @@ export const THEMES: readonly Theme[] = [
       foam: 0.6,
       gloss: 160,
     },
+    screen: {
+      ...SCREEN,
+      art: "fronds",
+      pitch: 13,
+      fill: 0.4,
+      wrap: 3,
+      strength: 0.38,
+      glow: 0.22,
+      drift: 2.2,
+      tint: 0xa8d878,
+    },
     exit: EXIT,
     light: {
       ...LIGHT,
@@ -302,6 +354,17 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.3,
       foam: 0.55,
       gloss: 220,
+    },
+    screen: {
+      ...SCREEN,
+      art: "cracks",
+      pitch: 18,
+      fill: 0.5,
+      wrap: 2,
+      strength: 0.9,
+      glow: 0.8,
+      drift: 0,
+      tint: 0xff7a28,
     },
     exit: { ...EXIT, glow: 0.55, mouth: 0.22 },
     light: {
@@ -361,6 +424,17 @@ export const THEMES: readonly Theme[] = [
       foam: 0.9,
       gloss: 520,
     },
+    screen: {
+      ...SCREEN,
+      art: "strata",
+      pitch: 11,
+      fill: 0.8,
+      wrap: 2,
+      strength: 0.4,
+      glow: 0.12,
+      drift: 0,
+      tint: 0xf2fbff,
+    },
     exit: { ...EXIT, glow: 0.35, pulse: 0.9, mouth: 0.1 },
     light: {
       ...LIGHT,
@@ -417,6 +491,17 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.28,
       foam: 0.8,
       gloss: 600,
+    },
+    screen: {
+      ...SCREEN,
+      art: "grid",
+      pitch: 9,
+      fill: 0.35,
+      wrap: 3,
+      strength: 1.1,
+      glow: 1,
+      drift: -6,
+      tint: 0x50f0ff,
     },
     exit: { ...EXIT, glow: 0.8, pulse: 1.8, mouth: 0.3, current: 0.3 },
     light: {
