@@ -64,9 +64,12 @@ Open:
 - The pool phase costs 6.7 ms of a 16.7 ms budget at 3440×1440 and the tube
   phase 5.6, both with four samples. The post stack is four passes: the scene,
   three for the glow, and the frame itself.
-- On the WebGL 2 backend the world's shaders are still built as they are drawn:
-  the pool coming into view down each flume costs a stall of about two seconds.
-  The warm-up lands on WebGPU and does not there, and why is not yet known.
+- On the WebGL 2 backend each flume still costs a stall of about a second, and
+  the main thread spends it inside `getBufferSubData`. Chrome's WebGL readback is
+  a synchronous round trip to the GPU process, so the field copy is billed for
+  whatever that process is busy with, which is the section's programs being
+  linked as they are drawn. The programs are what make the GPU busy; the readback
+  is what turns a busy GPU into a frozen ride.
 - A material bakes its theme, its flume's length and its radius in as constants,
   so no two sections share a shader and each costs a score of them. Those three
   as uniforms would make the set finite; the sampled maps that had to come
@@ -327,8 +330,11 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   per-section state living on the material, and a mouth's pulse is per-mouth.
   They move to an attribute or a per-draw uniform first.
 
-  Chase the WebGL warm-up only if this leaves it standing. The screen art wants
-  authoring too, but that is themes as art and stays out.
+  If that leaves the WebGL stall standing, the second half of it is the field
+  copy: a readback that lands on a busy GPU process blocks the main thread for as
+  long as that process is busy, and skipping a read while a section is warming
+  costs the game one frame of stale water. The screen art wants authoring too,
+  but that is themes as art and stays out.
 
 ### 10. Mobile (parked)
 
