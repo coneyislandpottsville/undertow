@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ENTRY_SPEED, FLOW, GRAVITY, MAX_SPEED, MIN_SPEED, QUAD_DRAG } from "./physics";
 
 export type PathSample = {
   position: THREE.Vector3;
@@ -9,6 +10,13 @@ export type PathSample = {
   curvature: THREE.Vector3;
   quat: THREE.Quaternion;
   distance: number;
+  /**
+   * Unit vector along apparent gravity here — gravity plus the centrifugal
+   * push of speed² × curvature — at the section's nominal speed. This is the
+   * direction the water film runs down, so at the top of a loop it points at
+   * the outer wall, not at the ground.
+   */
+  apparentDown: THREE.Vector3;
 };
 
 export type PathData = {
@@ -98,10 +106,49 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
       curvature,
       quat,
       distance: i * actualSpacing,
+      apparentDown: new THREE.Vector3(0, -1, 0),
     });
   }
 
+  applyApparentGravity(samples, actualSpacing);
   return { curve, samples, length, spacing: actualSpacing, radius };
+}
+
+/**
+ * Fill in each sample's apparent-gravity direction.
+ *
+ * The rider's speed is not known when a section is built, but it is very nearly
+ * determined by the section's own slope: the same integration updateSlide runs,
+ * with no throttle and no brake. That is enough to know which wall the film
+ * runs down, which is all this is for.
+ */
+function applyApparentGravity(samples: PathSample[], spacing: number) {
+  const raw: THREE.Vector3[] = [];
+  const g = new THREE.Vector3();
+  let v = ENTRY_SPEED;
+  for (const sample of samples) {
+    const along = -sample.tangent.y * GRAVITY + FLOW - QUAD_DRAG * v * v;
+    // dv = a dt and dt = ds / v, so a step of arc length costs a ds / v of speed.
+    v = THREE.MathUtils.clamp(v + (along * spacing) / Math.max(v, 1), MIN_SPEED, MAX_SPEED);
+    // Apparent gravity in the rider's frame: gravity, plus the centrifugal push
+    // away from the centre of curvature. Weightless at the crest of a hump, so
+    // fall back to plain down rather than normalising something near zero.
+    g.set(0, -GRAVITY, 0).addScaledVector(sample.curvature, -(v * v));
+    const mag = g.length();
+    raw.push(mag > 1 ? g.clone().divideScalar(mag) : new THREE.Vector3(0, -1, 0));
+  }
+  // The same short box filter the curvature gets, so the band slides around the
+  // tube through a loop instead of snapping across it.
+  for (let i = 0; i < samples.length; i++) {
+    const acc = new THREE.Vector3();
+    for (let k = -3; k <= 3; k++) {
+      const j = i + k;
+      if (j < 0 || j >= raw.length) continue;
+      acc.add(raw[j]!);
+    }
+    if (acc.lengthSq() < 1e-6) acc.set(0, -1, 0);
+    samples[i]!.apparentDown = acc.normalize();
+  }
 }
 
 /**

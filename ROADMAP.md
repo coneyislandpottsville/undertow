@@ -40,7 +40,7 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 2, September 2026)
+## Where it stands (Build 3, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
@@ -73,12 +73,17 @@ radial blur. Gameplay files changed only where the renderer forced it (async
 init, spray as an instanced sprite, vertex tangents and the tube radius for the
 film).
 
+Done in Build 3 session 2 (PRs #9 to #12): the pool side. One rig, moved to the
+pool the rider is heading into, carries the whirlpool funnel and the water
+surface; spray and mist run on the GPU; the film's wet band follows apparent g.
+Phase 4 is complete: all four surfaces from the research memo are in the ride.
+
 Open:
 
 - Progression undecided: depth counter only.
-- The pool wall reads near-black; the film's wet band follows gravity, not
-  apparent g, so loop tops are wet on the wrong wall; the exit flash (ring
-  bloom at point-blank range) may want taming.
+- The pool wall is no longer black but is still bare: it carries the wall
+  streaks and a little emissive, and wants the theme pass to finish it. The
+  exit flash (ring bloom at point-blank range) may want taming.
 - Corkscrews at low speed slosh the rider; tune pendulum gain and damping by feel.
 - Mobile untested: touch keys exist, layout and performance do not.
 
@@ -105,7 +110,7 @@ Open:
 - Decide progression: depth counter only, or stakes such as near-misses,
   collectibles, or run length.
 
-### 3. The tube as a canvas
+### 3. The tube as a canvas (next)
 
 - Theme = palette + materials + lighting + fog + animated maps + video
   textures, chosen per section.
@@ -115,7 +120,7 @@ Open:
   every theme is written once as node materials instead of GLSL first and TSL
   later.
 
-### 4. Rendering upgrade (path decided 2026-09-08)
+### 4. Rendering upgrade (done in Build 3, path decided 2026-09-08)
 
 Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
 `/lab` (unlisted), bench via `node scripts/lab-bench.mjs`.
@@ -133,15 +138,20 @@ Decision and numbers: `docs/research/water-and-renderer.md`. Prototypes under
   current strips, radial zoom blur from speed and the exit suck-in, `?post=0`
   to bypass). Numbers per step in `docs/research/ride-bench.md`; every route
   smokes on both backends with `node scripts/route-smoke.mjs`.
-- Next, in product order: whirlpool funnel (the tension moment), pool
-  reflection and refraction with the compute height field, spray and mist.
-  Build the funnel first. Alongside it, make the film's wet band follow
-  apparent g along the path instead of gravity: today the top of a loop is wet
-  on the inner wall while the rider is pressed to the outer one.
-- Budget: 60 fps at 3440×1440 on an RTX 2060 class GPU with everything on;
-  measured costs in `docs/research/water-bench.md`. Fallback tier on WebGL 2:
-  analytic ripples instead of the height field, fewer particles, half-res
-  bloom.
+- Done in Build 3 session 2 (PRs #9 to #12): the whirlpool funnel and the pool
+  surface as one rig (`src/game/pool-surface.ts`) moved to the pool being
+  ridden into, so the vertex grid, the half-resolution reflection and the
+  height field are one of each however many sections are alive; GPU spray and
+  mist (`src/game/spray.ts`), two storage buffers and one kernel so the WebGL 2
+  backend runs it as transform feedback; the film's wet band on apparent g
+  (`src/game/physics.ts`, `apparentDown` in `path.ts`).
+- Budget met: 128 fps in the pool phase and 198 in the tube at 3440×1440 with
+  MSAA 4× on WebGPU, 162 and 220 on the WebGL 2 tier, against 60. Per-step
+  numbers in `docs/research/ride-bench.md`, which measures both phases.
+  WebGL 2 tier: analytic ripples instead of the height field. Knobs:
+  `?ripples=`, `?reflect=`, `?refract=`, `?spray=`, `?post=0`.
+- Next: phase 3. Every surface reads its colours from `palette`, so a theme is
+  a palette plus maps plus lighting, authored once as node materials.
 
 ### 5. Mobile
 
