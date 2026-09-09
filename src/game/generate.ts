@@ -11,10 +11,9 @@ import {
   createCurrentMaterial,
   createExitRingMaterial,
   createMouthMaterial,
-  createPoolFloorMaterial,
+  createBasinMaterial,
   createRingMaterial,
   createTubeMaterial,
-  createWallMaterial,
   createWaterMaterial,
   scrollCurrents,
   scrollTube,
@@ -72,6 +71,17 @@ let nextId = 1;
  * whirlpool funnel's throat (see FUNNEL_DEPTH in pool-surface.ts).
  */
 const BASIN_DEPTH = 5.5;
+/** Metres from the water line to the rim of the wall, clear of the mouths. */
+const POOL_RIM = 7;
+/**
+ * How far the entrance tube and the exit mouths reach past the wall, m.
+ *
+ * Both arrive with the tube floor on the water line, and both stop a short way
+ * inside, so nothing cuts the surface and the wall is what the rider shoots out
+ * of. The wall is drawn back-face only, so it never blocks the tube it pierces.
+ */
+const TUBE_INTO_POOL = 1.6;
+const MOUTH_INTO_POOL = 1;
 
 function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
   points.push(points[points.length - 1]!.clone().addScaledVector(dir, dist));
@@ -269,7 +279,7 @@ function addHump(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-function addSplash(points: THREE.Vector3[], rng: Rng): PoolData {
+function addSplash(points: THREE.Vector3[], rng: Rng, tubeRadius: number): PoolData {
   const dir = lastDir(points);
   const flat = dir.clone();
   flat.y = THREE.MathUtils.clamp(flat.y, -0.28, -0.06);
@@ -292,15 +302,19 @@ function addSplash(points: THREE.Vector3[], rng: Rng): PoolData {
   inward.normalize();
 
   const radius = rng.range(14.5, 18.5);
-  const waterY = end.y - 1.15;
+  // The tube arrives with its floor on the water line and runs level through
+  // the wall, so the last metres never cut the surface.
+  const waterY = end.y - tubeRadius;
   const center = end.clone().addScaledVector(inward, radius + 1.1);
   center.y = waterY;
 
-  const rim = center.clone().addScaledVector(inward, -(radius - 1.3));
-  rim.y = waterY + 0.35;
-  points.push(rim);
-  const splash = center.clone().addScaledVector(inward, -(radius - 4.2));
-  splash.y = waterY + 0.12;
+  const mouth = center.clone().addScaledVector(inward, -(radius - TUBE_INTO_POOL));
+  mouth.y = waterY + tubeRadius;
+  points.push(mouth);
+  // Out of the wall and down: the rider is in open air over the pool for the
+  // last few metres, and lands with their eye at the water line.
+  const splash = center.clone().addScaledVector(inward, -(radius - 5.2));
+  splash.y = waterY + 1.35;
   points.push(splash);
 
   return { center, radius, waterY };
@@ -351,7 +365,12 @@ function pickFeatures(rng: Rng, first: boolean): Feature[] {
   return out.slice(0, 6);
 }
 
-function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exit[] {
+function makeExits(
+  pool: PoolData,
+  entranceInward: THREE.Vector3,
+  rng: Rng,
+  tubeRadius: number,
+): Exit[] {
   const inward = entranceInward.clone();
   inward.y = 0;
   if (inward.lengthSq() < 1e-6) inward.set(0, 0, 1);
@@ -366,7 +385,7 @@ function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exi
     const a = startA + i * step + rng.range(-0.08, 0.08);
     const outward = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
     const position = pool.center.clone().addScaledVector(outward, pool.radius - 0.15);
-    position.y = pool.waterY;
+    position.y = pool.waterY + tubeRadius;
     const tangent = outward.clone();
     tangent.y = -0.2;
     tangent.normalize();
@@ -375,9 +394,57 @@ function makeExits(pool: PoolData, entranceInward: THREE.Vector3, rng: Rng): Exi
   return exits;
 }
 
-function addRings(group: THREE.Group, path: PathData, theme: Theme, geometries: THREE.BufferGeometry[], materials: THREE.Material[]) {
+/**
+ * The last metres of tube stand proud of the wall, and the tube is drawn from
+ * the inside only, so they need an outside as well: a short sleeve in the
+ * basin's own rock, which reads as the flume emerging from it.
+ */
+function addSleeve(
+  group: THREE.Group,
+  path: PathData,
+  stop: number,
+  pool: PoolData,
+  theme: Theme,
+  geometries: THREE.BufferGeometry[],
+  materials: THREE.Material[],
+) {
+  const from = Math.max(0, stop - 9);
+  const pts: THREE.Vector3[] = [];
+  for (let d = from; d <= stop; d += 1.5) {
+    const i = THREE.MathUtils.clamp(Math.round(d / path.spacing), 0, path.samples.length - 1);
+    pts.push(path.samples[i]!.position);
+  }
+  if (pts.length < 3) return;
+  const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+  const geo = new THREE.TubeGeometry(curve, pts.length * 2, path.radius + 0.14, 20, false);
+  const mat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "rim");
+  const sleeve = new THREE.Mesh(geo, mat);
+  sleeve.frustumCulled = false;
+  group.add(sleeve);
+  geometries.push(geo);
+  materials.push(mat);
+}
+
+/** How far along the path the tube is still inside its own walls, m. */
+function tubeEndDistance(path: PathData, pool: PoolData): number {
+  const stop = pool.radius - TUBE_INTO_POOL;
+  for (let i = path.samples.length - 1; i >= 0; i--) {
+    const p = path.samples[i]!.position;
+    if (Math.hypot(p.x - pool.center.x, p.z - pool.center.z) > stop) return path.samples[i]!.distance;
+  }
+  return path.length;
+}
+
+function addRings(
+  group: THREE.Group,
+  path: PathData,
+  stop: number,
+  theme: Theme,
+  geometries: THREE.BufferGeometry[],
+  materials: THREE.Material[],
+) {
   const spacing = 5.2;
-  const count = Math.max(0, Math.floor((path.length - 12) / spacing));
+  const count = Math.max(0, Math.floor((Math.min(path.length, stop) - 5) / spacing));
   if (count < 1) return;
   const geo = new THREE.TorusGeometry(path.radius - 0.05, 0.055, 5, 20);
   const mat = createRingMaterial(theme);
@@ -386,7 +453,7 @@ function addRings(group: THREE.Group, path: PathData, theme: Theme, geometries: 
   const dummy = new THREE.Object3D();
   for (let i = 0; i < count; i++) {
     const dist = 3 + i * spacing;
-    const u = THREE.MathUtils.clamp(dist / path.length, 0, 0.92);
+    const u = THREE.MathUtils.clamp(dist / path.length, 0, 1);
     const idx = Math.min(path.samples.length - 1, Math.round(u * (path.samples.length - 1)));
     const s = path.samples[idx]!;
     dummy.position.copy(s.position);
@@ -416,7 +483,7 @@ function addMouth(
 ): ExitVisual {
   const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
   const pts = [
-    exit.position.clone().addScaledVector(outward, -2.2),
+    exit.position.clone().addScaledVector(outward, -MOUTH_INTO_POOL),
     exit.position.clone(),
     exit.position.clone().addScaledVector(outward, 3.2).add(new THREE.Vector3(0, -0.4, 0)),
     exit.position.clone().addScaledVector(outward, 6.5).add(new THREE.Vector3(0, -1.4, 0)),
@@ -492,12 +559,19 @@ function assembleMeshes(
   const materials: THREE.Material[] = [];
   const exitVisuals: ExitVisual[] = [];
 
+  const RADIAL = 10;
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
-  const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, 10, false);
+  const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, RADIAL, false);
   // The film's normal map and anisotropy need per-vertex tangents; the
   // derivative fallback is skewed by the tube's long, thin uv parametrisation.
   tubeGeo.computeTangents();
-  addApparentDown(tubeGeo, tubular, 10, (u) => sampleApparentDown(path, u * path.length));
+  addApparentDown(tubeGeo, tubular, RADIAL, (u) => sampleApparentDown(path, u * path.length));
+  // TubeGeometry indexes ring by ring, so drawing a prefix of the index buffer
+  // stops the tube where it enters the pool: the rest of the path is the
+  // rider's flight over the water.
+  const stop = tubeEndDistance(path, pool);
+  const rings = THREE.MathUtils.clamp(Math.round((stop / path.length) * tubular), 1, tubular);
+  tubeGeo.setDrawRange(0, rings * RADIAL * 6);
   const tubeMat = createTubeMaterial(theme, path.length, path.radius);
   const tube = new THREE.Mesh(tubeGeo, tubeMat);
   tube.frustumCulled = false;
@@ -505,28 +579,31 @@ function assembleMeshes(
   geometries.push(tubeGeo);
   materials.push(tubeMat);
 
-  addRings(group, path, theme, geometries, materials);
+  addRings(group, path, stop, theme, geometries, materials);
+  addSleeve(group, path, stop, pool, theme, geometries, materials);
 
-  // The basin runs from the lip down past the throat of the whirlpool funnel,
+  // The basin runs from the rim down past the throat of the whirlpool funnel,
   // so the vortex never pokes through the floor and refraction has a closed
   // bowl to look into rather than the void beyond an open-sided cylinder.
-  const wallHeight = BASIN_DEPTH + 4.3;
-  const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 48, 1, true);
-  const wallMat = createWallMaterial(theme);
+  const wallHeight = BASIN_DEPTH + POOL_RIM;
+  const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 64, 1, true);
+  const wallMat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "wall");
   const wall = new THREE.Mesh(wallGeo, wallMat);
   wall.position.copy(pool.center);
-  wall.position.y = pool.waterY + 4.3 - wallHeight / 2;
+  wall.position.y = pool.waterY + POOL_RIM - wallHeight / 2;
   group.add(wall);
   geometries.push(wallGeo);
   materials.push(wallMat);
 
   const lipGeo = new THREE.TorusGeometry(pool.radius, 0.38, 8, 48);
-  const lip = new THREE.Mesh(lipGeo, wallMat);
+  const lipMat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "rim");
+  const lip = new THREE.Mesh(lipGeo, lipMat);
   lip.rotation.x = Math.PI / 2;
   lip.position.copy(pool.center);
-  lip.position.y = pool.waterY + 4.2;
+  lip.position.y = pool.waterY + POOL_RIM - 0.1;
   group.add(lip);
   geometries.push(lipGeo);
+  materials.push(lipMat);
 
   const waterGeo = new THREE.CircleGeometry(pool.radius - 0.05, 48);
   const waterMat = createWaterMaterial(theme);
@@ -539,17 +616,14 @@ function assembleMeshes(
   geometries.push(waterGeo);
   materials.push(waterMat);
 
-  // The floor is under the water now that the surface refracts, so it gets its
-  // own lit material and a light of its own; the wall material left it black.
-  const floorGeo = new THREE.CircleGeometry(pool.radius + 1.2, 32);
-  const floorMat = createPoolFloorMaterial(theme);
+  const floorGeo = new THREE.CircleGeometry(pool.radius + 1.2, 48);
+  const floorMat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "floor");
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.copy(pool.center);
   floor.position.y = pool.waterY - BASIN_DEPTH;
   group.add(floor);
   geometries.push(floorGeo);
-  materials.push(floorMat);
   materials.push(floorMat);
 
   for (const exit of exits) {
@@ -641,19 +715,22 @@ export function generateSection(
   let pool!: PoolData;
   let path!: PathData;
   let cleaned!: THREE.Vector3[];
+  let radius = 2.75;
   for (let attempt = 0; attempt < GENERATION_ATTEMPTS; attempt++) {
     // Retries fork the same seed, so a rejected layout is skipped identically on replay.
     rng = new Rng(attempt === 0 ? seed : forkSeed(seed, 7919 * attempt));
+    // The splash needs the radius: it sets the water line from where the tube
+    // floor meets it.
+    radius = rng.range(2.55, 2.95);
     const points: THREE.Vector3[] = [];
     addLeadIn(points, start, startDir);
     for (const f of pickFeatures(rng, first)) runFeature(f, points, rng);
-    pool = addSplash(points, rng);
+    pool = addSplash(points, rng, radius);
     cleaned = cleanPoints(points);
     if (cleaned.length < 6) {
       cleaned.push(start.clone().add(new THREE.Vector3(0, -40, -80)));
       cleaned.push(pool.center.clone());
     }
-    const radius = rng.range(2.55, 2.95);
     path = buildPath(cleaned, radius);
     if (layoutIsClear(path, pool, avoid)) break;
   }
@@ -664,7 +741,7 @@ export function generateSection(
     pool.center.z - cleaned[cleaned.length - 1]!.z,
   );
   if (inward.lengthSq() < 1e-5) inward.copy(entrance);
-  const exits = makeExits(pool, inward, rng);
+  const exits = makeExits(pool, inward, rng, radius);
   const theme = themeAt(dropIndex);
   const meshes = assembleMeshes(path, pool, exits, theme);
   return {

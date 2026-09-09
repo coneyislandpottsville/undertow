@@ -2,18 +2,29 @@ import * as THREE from "three/webgpu";
 import {
   abs,
   attribute,
+  cameraPosition,
   color,
   dot,
   emissive,
+  faceDirection,
   float,
   fract,
+  length,
+  materialEmissive,
   mix,
   modelNormalMatrix,
   modelWorldMatrix,
   mrt,
+  mx_fractal_noise_float,
+  mx_noise_float,
   normalLocal,
   normalMap,
+  normalView,
   output,
+  positionView,
+  positionWorld,
+  pow,
+  sin,
   smoothstep,
   texture,
   transformDirection,
@@ -190,58 +201,138 @@ export function createWaterMaterial(theme: Theme): THREE.MeshStandardNodeMateria
   return mat;
 }
 
+/** How close the camera has to get before an emissive surface stops blooming, m. */
+const GLOW_NEAR = 1.6;
+const GLOW_FAR = 14;
+/** What is left of the glow at point-blank range. */
+const GLOW_FLOOR = 0.12;
+
 /**
- * The basin floor, seen through the water. The wall material reads black down
- * there; this one carries the wall's streaks at pool scale, a lighter tint, and
- * a little emissive, so refraction and Beer-Lambert absorption have something
- * to bend and something to eat.
+ * Emissive that gives way as the camera closes on it. An exit ring fills the
+ * screen on the way through the mouth, and a full-strength emissive there
+ * blows the bloom out to white; this keeps the ring readable from across the
+ * pool and lets it settle to its lit colour at arm's length.
  */
-export function createPoolFloorMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({
-    color: theme.wall,
-    map: floorTexture(),
-    roughness: theme.pool.floorRough,
-    metalness: 0.02,
-    emissive: new THREE.Color(theme.water),
-    emissiveIntensity: theme.pool.floorGlow,
-  });
-}
-
-let floorTex: THREE.CanvasTexture | null = null;
-
-/** The wall's streaks, tiled at pool scale. One texture for every basin. */
-function floorTexture(): THREE.CanvasTexture {
-  if (floorTex) return floorTex;
-  floorTex = repeatTexture(streakCanvas());
-  floorTex.repeat.set(3, 3);
-  return floorTex;
+function glowFalloff(): Node<"float"> {
+  const d = length(cameraPosition.sub(positionWorld));
+  return smoothstep(GLOW_NEAR, GLOW_FAR, d)
+    .mul(1 - GLOW_FLOOR)
+    .add(GLOW_FLOOR);
 }
 
 /**
- * The pool wall. The surface reflects it at grazing angles and refracts through
- * it below the water line, so it carries the streak map and a little emissive
- * of its own: a flat unlit colour reads as a black void.
+ * Perturb the shading normal by the screen-space gradient of a height field
+ * (Mikkelsen's unparametrised bump mapping). The basin's rock is procedural
+ * and its meshes carry no tangents, so its relief comes from derivatives of
+ * the same value that shades it rather than from a normal map.
  */
-export function createWallMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({
-    color: theme.wall,
-    map: wallTexture(),
-    roughness: theme.pool.wallRough,
-    metalness: theme.pool.wallMetal,
-    emissive: new THREE.Color(theme.wall),
-    emissiveIntensity: theme.pool.wallGlow,
-    side: THREE.DoubleSide,
-  });
+function bumpNormal(height: Node<"float">, scale: number): Node<"vec3"> {
+  const sigmaX = positionView.dFdx().normalize();
+  const sigmaY = positionView.dFdy().normalize();
+  const r1 = sigmaY.cross(normalView);
+  const r2 = normalView.cross(sigmaX);
+  const det = sigmaX.dot(r1).mul(faceDirection);
+  const grad = det.sign().mul(height.dFdx().mul(r1).add(height.dFdy().mul(r2)).mul(scale));
+  return det.abs().mul(normalView).sub(grad).normalize();
 }
 
-let wallTex: THREE.CanvasTexture | null = null;
+export type BasinSurface = "wall" | "floor" | "rim";
 
-/** The wall's streaks at pool scale; shared by every basin. */
-function wallTexture(): THREE.CanvasTexture {
-  if (wallTex) return wallTex;
-  wallTex = repeatTexture(streakCanvas());
-  wallTex.repeat.set(6, 1);
-  return wallTex;
+/**
+ * The pool wall and the basin under it: two-tone rock, banded by strata that
+ * wander, eroded down its height, grained on top. Below the water line it
+ * darkens, takes the water's colour and polishes; a scum line marks the edge;
+ * caustics off the surface play over everything submerged; above the line it
+ * fades out toward the rim.
+ *
+ * `waterY` and `rim` place all of that in world space, so the treatment is
+ * continuous across the wall, the rim and the floor rather than tiled per mesh.
+ */
+export function createBasinMaterial(
+  theme: Theme,
+  waterY: number,
+  rim: number,
+  surface: BasinSurface,
+): THREE.MeshStandardNodeMaterial {
+  const pool = theme.pool;
+  const flat = surface === "floor";
+  const p = positionWorld;
+  const depth = float(waterY).sub(p.y);
+  const submerged = smoothstep(-0.06, 0.5, depth);
+  const wet = submerged.max(smoothstep(-1.5, -0.05, depth).mul(0.75));
+
+  const warp = mx_noise_float(vec3(p.x.mul(0.05), p.y.mul(0.02), p.z.mul(0.05)));
+  const strata = flat
+    ? float(0.5)
+    : sin(p.y.mul(pool.bands).add(warp.mul(1.7))).mul(0.5).add(0.5);
+  const erosion = mx_fractal_noise_float(
+    flat ? vec3(p.x.mul(0.3), 3.7, p.z.mul(0.3)) : vec3(p.x.mul(0.8), p.y.mul(0.06), p.z.mul(0.8)),
+    3,
+    2.1,
+    0.55,
+  )
+    .mul(0.5)
+    .add(0.5);
+  const grain = mx_noise_float(p.mul(1.3)).mul(0.5).add(0.5);
+  const weights = pool.strata + pool.erosion + pool.grain;
+  // Grain is left out of the relief: at wall distances its wavelength is under
+  // a pixel and the derivative is noise.
+  const relief = strata.mul(pool.strata).add(erosion.mul(pool.erosion)).div(weights);
+  // The rock's tones are close together in a dark basin, so the mix is pushed
+  // out to the ends of its range before it reaches a colour.
+  const tone = smoothstep(0.28, 0.74, relief.add(grain.mul(pool.grain / weights)));
+
+  const rock = mix(color(theme.wall), color(theme.stripe), tone).mul(mix(1.1, 3.4, tone));
+  const soaked = rock.mul(0.55).add(color(theme.water).mul(pool.wetTint * 0.3));
+  const line = smoothstep(0.2, 0, abs(depth)).mul(pool.line);
+
+  // Above the water the wall runs out of light long before it runs out of rock.
+  const height = depth.negate().max(0);
+  const fade = mix(float(1), float(1 - pool.rim), smoothstep(1.2, rim * 1.15, height));
+
+  // Caustics as ridged noise: the filaments a wavy surface focuses light into,
+  // drifting with the water. They climb the rock as well as sinking through it,
+  // because the surface throws light both ways.
+  const scale = flat ? 1.2 : 1.7;
+  const t = uClock;
+  const drift = vec3(t.mul(0.42), t.mul(0.17), t.mul(-0.3));
+  const n = mx_fractal_noise_float(
+    vec3(p.x.mul(scale), p.y.mul(scale * 0.6), p.z.mul(scale)).add(drift),
+    2,
+    2.1,
+    0.5,
+  );
+  const filament = pow(abs(n).oneMinus().max(0), 8);
+  const reach = smoothstep(3.5, 0, height).max(
+    mix(float(1), float(0.4), smoothstep(0, 6, depth)).mul(submerged),
+  );
+  // Light pools in the rock's hollows rather than lying flat across it.
+  const caustic = filament
+    .mul(reach)
+    .mul(erosion.mul(0.8).add(0.4))
+    .mul(warp.mul(0.4).add(0.7))
+    .mul(pool.caustic * (flat ? 1 : 0.45));
+  // The pool is the brightest thing in the basin; the rock around it catches
+  // that light long before any lamp reaches it.
+  const bounce = smoothstep(2.5, 0, height).mul(submerged.oneMinus()).mul(pool.bounce);
+
+  const mat = new THREE.MeshStandardNodeMaterial({
+    metalness: pool.wallMetal,
+    side: surface === "wall" ? THREE.BackSide : THREE.DoubleSide,
+  });
+  mat.colorNode = mix(rock, soaked, wet).mul(fade).add(color(theme.ring).mul(line));
+  mat.normalNode = bumpNormal(relief, flat ? 0.9 : 2.2);
+  mat.roughnessNode = mix(
+    float(flat ? pool.floorRough : pool.wallRough),
+    float(flat ? pool.floorRough * 0.4 : pool.wallRough * 0.25),
+    wet,
+  );
+  mat.emissiveNode = color(theme.wall)
+    .mul(flat ? pool.floorGlow : pool.wallGlow)
+    .mul(fade)
+    .add(color(theme.water).mul(bounce))
+    .add(color(theme.ring).mul(caustic));
+  return mat;
 }
 
 /** Exit mouth: the tube material, film included, lit from inside so the hole reads from across the pool. */
@@ -253,17 +344,21 @@ export function createMouthMaterial(
   const mat = createTubeMaterial(theme, length, radius);
   mat.emissive = new THREE.Color(theme.accent);
   mat.emissiveIntensity = theme.exit.mouth;
+  mat.emissiveNode = materialEmissive.mul(glowFalloff());
   return mat;
 }
 
 export function createExitRingMaterial(theme: Theme): THREE.MeshStandardNodeMaterial {
-  return new THREE.MeshStandardNodeMaterial({
+  const mat = new THREE.MeshStandardNodeMaterial({
     color: theme.accent,
     roughness: 0.25,
     metalness: 0.1,
     emissive: new THREE.Color(theme.accent),
     emissiveIntensity: theme.exit.glow,
   });
+  // materialEmissive carries emissiveIntensity, which the ride pulses per frame.
+  mat.emissiveNode = materialEmissive.mul(glowFalloff());
+  return mat;
 }
 
 export function createCurrentMaterial(theme: Theme): THREE.MeshBasicNodeMaterial {
@@ -277,12 +372,12 @@ export function createCurrentMaterial(theme: Theme): THREE.MeshBasicNodeMaterial
     side: THREE.DoubleSide,
   });
   // Bloom reads the emissive target and an unlit strip writes none, so hand
-  // it the strip's own colour and alpha; the direct look is unchanged. The
-  // colour target is named too: a material MRT that names no target the
+  // it the strip's own colour and alpha, given up as the rider paddles over it.
+  // The colour target is named too: a material MRT that names no target the
   // framebuffer actually has compiles to an empty fragment struct, which is a
   // WGSL error wherever the renderer draws without MRT (?post=0, and inside
   // the pool's reflection pass).
-  mat.mrtNode = mrt({ ...colorTargets(output), emissive: output });
+  mat.mrtNode = mrt({ ...colorTargets(output), emissive: output.mul(glowFalloff()) });
   return mat;
 }
 
