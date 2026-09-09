@@ -51,8 +51,16 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 4.3, six themes (Step 3) | tube | webgl | 335 (2.7) | 212 (4.4) |
 | 4.3, six themes (Step 3) | pool | webgpu | 160 (1.6) | 92 (1.8) |
 | 4.3, six themes (Step 3) | pool | webgl | 160 (5.6) | 102 (14.6) |
+| 4.4, cross-fade at exits (Step 4) | tube | webgpu | 350 (0.5) | 216 (0.9) |
+| 4.4, cross-fade at exits (Step 4) | tube | webgl | 333 (2.9) | 212 (4.6) |
+| 4.4, cross-fade at exits (Step 4) | pool | webgpu | 160 (1.6) | 91 (3.3) |
+| 4.4, cross-fade at exits (Step 4) | pool | webgl | 161 (6.6) | 102 (14.1) |
 
 Notes:
+
+- Build 4 step 4 is free: the cross-fade is a handful of colour and scalar lerps once a
+  frame, and only while a fade is running. `?fade=` sets its length in seconds; `?fade=0`
+  is the snap it replaces.
 
 - Build 4 step 3 is free: a theme is data, and every surface already read its numbers from
   one. The 4 fps between the 4.2 and 4.3 pool rows on WebGPU is which theme the bench seed
