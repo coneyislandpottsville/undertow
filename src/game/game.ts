@@ -6,6 +6,7 @@ import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 import { createSprayMaterial, createWakeMaterial } from "./materials";
 import { createRidePost, type RidePost } from "./post";
+import { createPoolSurface, type PoolSurface } from "./pool-surface";
 import { forkSeed, seedFromQuery } from "./rng";
 import { pathHeading, samplePath } from "./path";
 
@@ -70,6 +71,7 @@ const _that = new THREE.Vector3();
 const _bodyUp = new THREE.Vector3();
 const _upProj = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
+const _poolOut = new THREE.Vector3();
 const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
@@ -109,6 +111,8 @@ export class Game {
   private readonly riderLight: THREE.PointLight;
   private readonly cavern: THREE.Mesh;
   private readonly floatie: THREE.Mesh;
+  /** The one whirlpool funnel and pool surface, moved to the pool being ridden into. */
+  private readonly poolSurface: PoolSurface;
   /** Instanced sprite: one quad per droplet, centred on `sprayAttr`. */
   private readonly spray: THREE.Sprite;
   private readonly sprayAttr: THREE.InstancedBufferAttribute;
@@ -266,10 +270,13 @@ export class Game {
       this.wake.push(quad);
     }
 
+    this.poolSurface = createPoolSurface(this.scene);
+
     const pose = startPose();
     this.current = generateSection(this.worldSeed, pose.position, pose.dir, 0, true);
     this.scene.add(this.current.group);
     this.sections.push(this.current);
+    this.poolSurface.attach(this.current);
     this.dist = 2.4;
     this.speed = 0;
     samplePath(this.current.path, this.dist, _frame);
@@ -352,6 +359,7 @@ export class Game {
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
     for (const quad of this.wake) (quad.material as THREE.Material).dispose();
+    this.poolSurface.dispose();
     this.post?.dispose();
     if (this.initialized) this.renderer.dispose();
     if (window.__controlsTest) delete window.__controlsTest;
@@ -585,17 +593,14 @@ export class Game {
     this.whirlAngle += spin * dt;
     this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
     this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
-    this.py = pool.waterY + 0.55;
+    // The rider sits on the funnel wall, so leaning in sinks them down the
+    // throat as well as tightening the spiral.
+    this.py = pool.waterY + this.poolSurface.heightAt(this.whirlR, e) + 0.55;
     this.eye.set(this.px, this.py + 0.62, this.pz);
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
     this.speed = spin * this.whirlR;
     if (tight > 0.7 && e > 0.4) this.trauma = Math.max(this.trauma, 0.1 + tight * 0.15);
-
-    this.current.whirl.rotation.z = -this.whirlAngle;
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
-    whirlMat.opacity = 0.25 + e * 0.7;
-    this.current.whirl.scale.setScalar(THREE.MathUtils.lerp(0.62, 1.05, e));
 
     // Once the vortex has weakened, a rider at the rim can paddle out of it early.
     const bail = e < 0.5 && this.input.getThrottle() > 0.5 && this.whirlR > outerR - 1.0;
@@ -606,8 +611,6 @@ export class Game {
     this.mode = "paddle";
     this.swirl = 1.2 + spin * 0.9;
     this.speed = THREE.MathUtils.clamp(this.speed * 0.5, 2, 6);
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
-    whirlMat.opacity = Math.min(whirlMat.opacity, 0.22);
     useHud.getState().patch({
       mode: "paddle",
       hint: "Paddle to a glowing exit · W/S move · A/D turn",
@@ -642,7 +645,9 @@ export class Game {
     this.whirlAngle += this.swirl * 0.12 * dt;
 
     const pool = this.current.pool;
-    this.py = pool.waterY + 0.55;
+    // A rider who paddled out at the rim leaves the vortex still turning; it
+    // fills back in under them rather than snapping flat.
+    this.whirlEnergy = Math.max(0, this.whirlEnergy - dt * 0.55);
     const near = this.nearestExit();
     if (near) {
       // Gentle surface current from the middle of the pool out toward the nearest mouth.
@@ -683,10 +688,14 @@ export class Game {
       if (radial > 0) this.speed *= 0.45;
     }
 
+    this.py = pool.waterY + this.poolSurface.heightAt(this.poolRadius(), this.whirlEnergy) + 0.55;
     this.eye.set(this.px, this.py + 0.58, this.pz);
-    const whirlMat = this.current.whirl.material as THREE.MeshBasicNodeMaterial;
-    whirlMat.opacity = expDamp(whirlMat.opacity, 0.12, 1.2, dt);
-    this.current.whirl.rotation.z -= dt * 0.15;
+  }
+
+  /** The rider's distance from the middle of the pool they are paddling in. */
+  private poolRadius() {
+    const pool = this.current.pool;
+    return Math.hypot(this.px - pool.center.x, this.pz - pool.center.z);
   }
 
   private nearestExit() {
@@ -749,6 +758,8 @@ export class Game {
     this.lift = 0;
     this.sink = 0;
     this.drop += 1;
+    this.whirlEnergy = 0;
+    this.poolSurface.attach(next);
     this.trauma = Math.max(this.trauma, 0.28);
     this.fovPunch = 12;
     this.audio.whoosh();
@@ -790,6 +801,7 @@ export class Game {
     this.updateCamera(dt);
     this.cavern.position.copy(this.camera.position);
     this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
+    this.poolSurface.update(dt, this.clock.elapsed, THREE.MathUtils.clamp(this.whirlEnergy, 0, 1));
     this.updateSpray(dt);
     this.updateWake(dt);
     this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);
@@ -842,26 +854,49 @@ export class Game {
     } else {
       _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       if (this.mode === "whirl") {
+        // Look along the spiral, pulled toward the throat: as the funnel
+        // deepens the rider is looking down into it, not across a flat pool.
+        const pool = this.current.pool;
+        const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
         _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
         _look.set(
-          this.current.pool.center.x - this.px,
-          0,
-          this.current.pool.center.z - this.pz,
+          pool.center.x - this.px,
+          pool.waterY + this.poolSurface.heightAt(this.whirlR * 0.3, e) + 0.5 - this.eye.y,
+          pool.center.z - this.pz,
         );
         if (_look.lengthSq() > 0.001) {
           _look.normalize();
-          _fwd.lerp(_look, 0.16).normalize();
+          // The stronger the vortex, the more the rider is turned into it.
+          _fwd.lerp(_look, 0.16 + 0.2 * e).normalize();
         }
-        _fwd.y = -0.02;
+        _fwd.y -= 0.02;
       }
       _fwd.y = this.mode === "paddle" ? -0.04 : _fwd.y;
       if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
       _fwd.normalize();
-      _right.crossVectors(_fwd, _up);
+
+      // Up is the water's own up. On the wall of the funnel that is the surface
+      // normal, tilted toward the throat, so the horizon banks with the vortex
+      // instead of staying level while the rider is visibly on a slope.
+      _camUp.copy(_up);
+      if (this.mode === "whirl") {
+        const pool = this.current.pool;
+        _poolOut.set(this.px - pool.center.x, 0, this.pz - pool.center.z);
+        if (_poolOut.lengthSq() > 1e-6) {
+          _poolOut.normalize();
+          const slope = this.poolSurface.slopeAt(
+            this.whirlR,
+            THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
+          );
+          _camUp.set(-slope * _poolOut.x, 1, -slope * _poolOut.z).normalize();
+        }
+      }
+      _right.crossVectors(_fwd, _camUp);
       if (_right.lengthSq() < 1e-6) _right.set(1, 0, 0);
       else _right.normalize();
+      _camUp.crossVectors(_right, _fwd).normalize();
       _tmp.copy(_fwd).negate();
-      _basis.makeBasis(_right, _up, _tmp);
+      _basis.makeBasis(_right, _camUp, _tmp);
       _qTarget.setFromRotationMatrix(_basis);
     }
 

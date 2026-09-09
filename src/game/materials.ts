@@ -261,16 +261,6 @@ export function scrollCurrents(dt: number) {
   uClock.value += dt;
 }
 
-export function createWhirlMaterial(texture: THREE.Texture): THREE.MeshBasicNodeMaterial {
-  return new THREE.MeshBasicNodeMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0.92,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-}
-
 /**
  * Spray droplets. WebGPU draws point primitives at one pixel, so the particles
  * are an instanced Sprite whose centres come from `positions`; the material
@@ -297,41 +287,4 @@ let softDot: THREE.CanvasTexture | null = null;
 export function softDotTexture(): THREE.CanvasTexture {
   softDot ??= new THREE.CanvasTexture(softDotCanvas());
   return softDot;
-}
-
-export function makeWhirlTexture(): THREE.CanvasTexture {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const g = ctx.createRadialGradient(256, 256, 6, 256, 256, 250);
-  g.addColorStop(0, "rgba(4,10,14,0.95)");
-  g.addColorStop(0.22, "rgba(18,70,82,0.55)");
-  g.addColorStop(0.55, "rgba(26,120,132,0.28)");
-  g.addColorStop(1, "rgba(40,160,170,0.04)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  ctx.strokeStyle = "rgba(190,230,230,0.38)";
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  for (let a = 0; a < 14 * Math.PI; a += 0.04) {
-    const r = 6 + a * 5.5;
-    const x = 256 + Math.cos(a) * r;
-    const y = 256 + Math.sin(a) * r;
-    if (a === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(10,30,36,0.35)";
-  ctx.lineWidth = 3;
-  for (let i = 1; i <= 7; i++) {
-    ctx.beginPath();
-    ctx.arc(256, 256, 28 * i, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
 }
