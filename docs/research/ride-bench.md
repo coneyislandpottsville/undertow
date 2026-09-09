@@ -95,8 +95,18 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 6.3, hardening (Step 3) | tube | webgl | 327 (2.9) | 205 (4.8) |
 | 6.3, hardening (Step 3) | pool | webgpu | 164 (0.5) | 97 (0.6) |
 | 6.3, hardening (Step 3) | pool | webgl | 160 (5.1) | 103 (8.6) |
+| 6.4, the sheet answers the rider (Step 4) | tube | webgpu | 338 (0.5) | 207 (0.8) |
+| 6.4, the sheet answers the rider (Step 4) | tube | webgl | 328 (2.8) | 206 (4.6) |
+| 6.4, the sheet answers the rider (Step 4) | pool | webgpu | 154 (0.4) | 100 (0.6) |
+| 6.4, the sheet answers the rider (Step 4) | pool | webgl | 159 (5.2) | 103 (8.5) |
 
 Notes:
+
+- Build 6 Step 4 is free: the levelling moves from the CPU at build time into the vertex stage,
+  which is a handful of instructions on a grid the tube already draws, and it takes a per-vertex
+  attribute out (the depth) as it puts one in (the nominal gravity). Nothing about the plough
+  survives being drawn narrower than a few of the tube's rings, which are one to two metres
+  apart, so its bow and trough are four metres wide and its wake runs at three waves to that.
 
 - Build 6 Step 3 is inside run-to-run noise: seeding the splash costs nothing, and the reflection
   it turns off is one the rider only sees from under the water. Draw calls in the pool go from 51

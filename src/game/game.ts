@@ -126,6 +126,8 @@ const _flow = new THREE.Vector2();
 const _under = new THREE.Vector3();
 const _bubbleAt = new THREE.Vector3();
 const _white = new THREE.Vector3(1, 1, 1);
+/** What the section's sheet is told about the rider each frame. */
+const _rider = { along: -1, speed: 0, g: 1 };
 
 /** One step of a light toward a theme's colour and intensity; `t` of 1 snaps. */
 function easeLight(light: THREE.Light, hex: number, intensity: number, t: number) {
@@ -1138,7 +1140,11 @@ export class Game {
     this.updateSubmersion(dt);
     this.applyFov();
     this.cavern.position.copy(this.camera.position);
-    this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
+    const sliding = this.mode === "slide" && this.released;
+    _rider.along = sliding ? this.dist / this.current.path.length : -1;
+    _rider.speed = sliding ? this.speed : 0;
+    _rider.g = THREE.MathUtils.clamp(this.press / GRAVITY, 0, 3);
+    this.current.tick(dt, this.clock.elapsed, _rider);
     this.updatePoolSurface(dt);
     this.updateSpray(dt);
     this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);

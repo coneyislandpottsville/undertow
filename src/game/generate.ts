@@ -16,6 +16,7 @@ import {
   createTubeMaterial,
   createWaterMaterial,
   tickMaterials,
+  ploughSheet,
   scrollTube,
   themeForSeed,
   type Theme,
@@ -53,7 +54,12 @@ export type RideSection = {
    * Animate this section's cues; call once per frame for the section the rider
    * is in. `speed` scrolls the tube's flow streaks; pass 0 outside the tube.
    */
-  tick: (dt: number, elapsed: number, speed: number) => void;
+  /**
+   * Advance what the section animates. `rider` is where the rider is along this
+   * section's tube (0 to 1, negative when they are elsewhere), how fast, and
+   * the apparent gravity they are pulling: what the sheet answers.
+   */
+  tick: (dt: number, elapsed: number, rider: { along: number; speed: number; g: number }) => void;
   dispose: () => void;
 };
 
@@ -536,7 +542,7 @@ function addMouth(
 
   // The same sheet the tube beyond it runs, so the water does not stop at the
   // mouth and start again inside.
-  const sheetGeo = buildSheet(geo, radius, 12, theme, () => 1);
+  const sheetGeo = buildSheet(geo, 12, () => 1);
   const sheetMat = createSheetMaterial(theme, 9, radius);
   const sheetMesh = new THREE.Mesh(sheetGeo, sheetMat);
   sheetMesh.frustumCulled = false;
@@ -594,9 +600,7 @@ function assembleMeshes(
   geometries.push(tubeGeo);
   materials.push(tubeMat);
 
-  const sheetGeo = buildSheet(tubeGeo, path.radius, tubular, theme, (u) =>
-    sampleApparentG(path, u * path.length),
-  );
+  const sheetGeo = buildSheet(tubeGeo, tubular, (u) => sampleApparentG(path, u * path.length));
   sheetGeo.setDrawRange(0, rings * RADIAL * 6);
   const sheetMat = createSheetMaterial(theme, path.length, path.radius);
   const sheet = new THREE.Mesh(sheetGeo, sheetMat);
@@ -672,9 +676,17 @@ function assembleMeshes(
   return {
     group,
     water,
-    tick: (dt, elapsed, speed) => {
-      scrollTube(tubeMat, dt, speed);
-      scrollTube(sheetMat, dt, speed);
+    tick: (dt, elapsed, rider) => {
+      scrollTube(tubeMat, dt, rider.speed);
+      scrollTube(sheetMat, dt, rider.speed);
+      // How hard the rider ploughs is how much water they are moving: nothing
+      // at a standstill, all of it at speed.
+      ploughSheet(
+        sheetMat,
+        rider.along,
+        rider.along < 0 ? 0 : THREE.MathUtils.clamp(rider.speed / 26, 0, 1.3),
+        rider.g,
+      );
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity =
@@ -701,48 +713,21 @@ const SHEET_G_CAP = 3;
 /**
  * The sheet of water the flume runs, built from the tube it runs in.
  *
- * The water levels off in each ring's own apparent gravity, so its surface is
- * the plane at a fixed height along `-aDown`: every wall vertex below that
- * plane moves up onto it, and the ones above stay on the wall with no water
- * over them. `aDepth` records how much water each vertex ended up under, which
- * is what the wall behind is absorbed by and where the leading edge is cut.
+ * It is the tube's own geometry with the apparent gravity of each ring on it;
+ * the levelling happens in the vertex stage, so how deep the water stands can
+ * answer the rider rather than being fixed when the section is built. `aG` is
+ * the nominal apparent gravity along the tube, which is what the water levels
+ * to everywhere the rider is not.
  */
-function buildSheet(
-  tubeGeo: THREE.BufferGeometry,
-  radius: number,
-  tubular: number,
-  theme: Theme,
-  gAt: (u: number) => number,
-) {
+function buildSheet(tubeGeo: THREE.BufferGeometry, tubular: number, gAt: (u: number) => number) {
   const geo = tubeGeo.clone();
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  const nor = geo.attributes.normal as THREE.BufferAttribute;
-  const down = geo.attributes.aDown as THREE.BufferAttribute;
-  const count = pos.count;
+  const count = geo.attributes.position!.count;
   const perRing = count / (tubular + 1);
-  const depth = new Float32Array(count);
-  const p = new THREE.Vector3();
-  const n = new THREE.Vector3();
-  const up = new THREE.Vector3();
+  const g = new Float32Array(count);
   for (let i = 0; i < count; i++) {
-    const g = THREE.MathUtils.clamp(gAt(Math.floor(i / perRing) / tubular), 0, SHEET_G_CAP);
-    const stand = radius * (theme.sheet.depth + theme.sheet.depthG * g);
-    p.fromBufferAttribute(pos, i);
-    n.fromBufferAttribute(nor, i);
-    up.fromBufferAttribute(down, i).negate();
-    // The surface is the plane `stand` metres up from the lowest point of the
-    // ring, so a vertex on the wall rises to it by whatever it is short.
-    const lift = stand - radius - radius * n.dot(up);
-    if (lift > 0) {
-      p.addScaledVector(up, lift);
-      pos.setXYZ(i, p.x, p.y, p.z);
-      nor.setXYZ(i, up.x, up.y, up.z);
-      depth[i] = lift;
-    }
+    g[i] = THREE.MathUtils.clamp(gAt(Math.floor(i / perRing) / tubular), 0, SHEET_G_CAP);
   }
-  pos.needsUpdate = true;
-  nor.needsUpdate = true;
-  geo.setAttribute("aDepth", new THREE.BufferAttribute(depth, 1));
+  geo.setAttribute("aG", new THREE.BufferAttribute(g, 1));
   return geo;
 }
 
