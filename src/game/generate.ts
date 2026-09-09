@@ -17,7 +17,7 @@ import {
   createWaterMaterial,
   scrollCurrents,
   scrollTube,
-  themeAt,
+  themeForSeed,
   type Theme,
 } from "./materials";
 
@@ -26,6 +26,8 @@ export type Exit = {
   angle: number;
   position: THREE.Vector3;
   tangent: THREE.Vector3;
+  /** The theme of the section beyond it, so a mouth advertises where it goes. */
+  theme: Theme;
   next: RideSection | null;
 };
 
@@ -59,6 +61,8 @@ type ExitVisual = {
   light: THREE.PointLight;
   /** The surface-current strip's material, faded out while the vortex runs. */
   strip: THREE.MeshBasicNodeMaterial;
+  /** The destination's theme, which is what this mouth is dressed in. */
+  theme: Theme;
   phase: number;
 };
 
@@ -365,11 +369,18 @@ function pickFeatures(rng: Rng, first: boolean): Feature[] {
   return out.slice(0, 6);
 }
 
+/** The seed a section reached through exit `index` is grown from. */
+export function exitSeed(sectionSeed: number, index: number): number {
+  return forkSeed(sectionSeed, index + 1);
+}
+
 function makeExits(
   pool: PoolData,
   entranceInward: THREE.Vector3,
   rng: Rng,
   tubeRadius: number,
+  seed: number,
+  from: Theme,
 ): Exit[] {
   const inward = entranceInward.clone();
   inward.y = 0;
@@ -389,7 +400,14 @@ function makeExits(
     const tangent = outward.clone();
     tangent.y = -0.2;
     tangent.normalize();
-    exits.push({ index: i, angle: a, position, tangent, next: null });
+    exits.push({
+      index: i,
+      angle: a,
+      position,
+      tangent,
+      theme: themeForSeed(exitSeed(seed, i), from.id),
+      next: null,
+    });
   }
   return exits;
 }
@@ -477,10 +495,10 @@ function addMouth(
   exit: Exit,
   pool: PoolData,
   radius: number,
-  theme: Theme,
   geometries: THREE.BufferGeometry[],
   materials: THREE.Material[],
 ): ExitVisual {
+  const theme = exit.theme;
   const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
   const pts = [
     exit.position.clone().addScaledVector(outward, -MOUTH_INTO_POOL),
@@ -545,7 +563,7 @@ function addMouth(
   geometries.push(stripGeo);
   materials.push(stripMat);
 
-  return { ring, light, strip: stripMat, phase: exit.index * 1.9 };
+  return { ring, light, strip: stripMat, theme, phase: exit.index * 1.9 };
 }
 
 function assembleMeshes(
@@ -627,7 +645,7 @@ function assembleMeshes(
   materials.push(floorMat);
 
   for (const exit of exits) {
-    exitVisuals.push(addMouth(group, exit, pool, path.radius, theme, geometries, materials));
+    exitVisuals.push(addMouth(group, exit, pool, path.radius, geometries, materials));
   }
 
   const light = new THREE.PointLight(theme.accent, theme.light.pool, pool.radius * 3.2, 1.3);
@@ -650,12 +668,12 @@ function assembleMeshes(
       for (const v of exitVisuals) {
         const pulse = 0.5 + 0.5 * Math.sin(elapsed * 2.6 + v.phase);
         (v.ring.material as THREE.MeshStandardNodeMaterial).emissiveIntensity =
-          theme.exit.glow + pulse * theme.exit.pulse;
-        v.light.intensity = theme.exit.light + pulse * theme.exit.lightPulse;
+          v.theme.exit.glow + pulse * v.theme.exit.pulse;
+        v.light.intensity = v.theme.exit.light + pulse * v.theme.exit.lightPulse;
         // The vortex draws the whole surface down and the strips are flat
         // quads on the still water line, so a running whirlpool leaves them
         // hanging in the air. They are a paddling cue anyway: fade them out.
-        v.strip.opacity = theme.exit.current * (1 - whirl);
+        v.strip.opacity = v.theme.exit.current * (1 - whirl);
       }
       scrollCurrents(dt);
     },
@@ -707,7 +725,7 @@ export function generateSection(
   seed: number,
   start: THREE.Vector3,
   startDir: THREE.Vector3,
-  dropIndex: number,
+  theme: Theme,
   first: boolean,
   avoid: PoolData[] = [],
 ): RideSection {
@@ -741,8 +759,7 @@ export function generateSection(
     pool.center.z - cleaned[cleaned.length - 1]!.z,
   );
   if (inward.lengthSq() < 1e-5) inward.copy(entrance);
-  const exits = makeExits(pool, inward, rng, radius);
-  const theme = themeAt(dropIndex);
+  const exits = makeExits(pool, inward, rng, radius, seed, theme);
   const meshes = assembleMeshes(path, pool, exits, theme);
   return {
     id: nextId++,

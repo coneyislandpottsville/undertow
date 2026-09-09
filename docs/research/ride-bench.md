@@ -47,8 +47,16 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 4.2, the pool wall and basin (Step 2) | tube | webgl | 336 (2.8) | 214 (4.6) |
 | 4.2, the pool wall and basin (Step 2) | pool | webgpu | 161 (2.1) | 96 (1.9) |
 | 4.2, the pool wall and basin (Step 2) | pool | webgl | 160 (6.5) | 103 (11.1) |
+| 4.3, six themes (Step 3) | tube | webgpu | 351 (0.5) | 216 (0.9) |
+| 4.3, six themes (Step 3) | tube | webgl | 335 (2.7) | 212 (4.4) |
+| 4.3, six themes (Step 3) | pool | webgpu | 160 (1.6) | 92 (1.8) |
+| 4.3, six themes (Step 3) | pool | webgl | 160 (5.6) | 102 (14.6) |
 
 Notes:
+
+- Build 4 step 3 is free: a theme is data, and every surface already read its numbers from
+  one. The 4 fps between the 4.2 and 4.3 pool rows on WebGPU is which theme the bench seed
+  lands in, not a cost: `?theme=` holds the ride to one for a like-for-like look.
 
 - Build 4 step 2 costs the pool phase about a quarter of its frame rate: 96 fps at 3440x1440
   on WebGPU and 103 on the WebGL 2 tier, 10.4 and 9.7 ms of a 16.7 ms budget. The wall, the
