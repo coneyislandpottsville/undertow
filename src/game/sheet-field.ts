@@ -162,7 +162,7 @@ export type SheetField = {
  * the pool under it; the pool's inflow reads {@link SheetField.outfall} back, so
  * water the rider pushes ahead of them arrives in what they are about to land in.
  */
-export function createSheetField(renderer: THREE.WebGPURenderer, on: boolean): SheetField {
+export function createSheetField(renderer: THREE.WebGPURenderer): SheetField {
   const mat = new THREE.MeshBasicNodeMaterial();
   const uClear = uniform(0);
   const uTime = uniform(0);
@@ -278,7 +278,7 @@ export function createSheetField(renderer: THREE.WebGPURenderer, on: boolean): S
 
   return {
     attach(section) {
-      if (!on || attached === section) return;
+      if (attached === section) return;
       attached?.sheet.setField(0);
       attached = section;
       section.sheet.setField(1);

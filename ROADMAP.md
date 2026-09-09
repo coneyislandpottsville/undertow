@@ -55,8 +55,7 @@ the rider floats on, goes under, splashes into and reads through; the post
 stack, the spray and the audio all answer what the water is doing.
 
 Knobs: `?seed=`, `?theme=`, `?screen=`, `?fade=`, `?backend=`, `?post=0`,
-`?ripples=`, `?reflect=`, `?refract=`, `?foam=`, `?spray=`, `?spraysize=`,
-`?gpu=1`.
+`?reflect=`, `?refract=`, `?foam=`, `?spray=`, `?spraysize=`, `?gpu=1`.
 
 Open:
 
@@ -75,8 +74,6 @@ Open:
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
-- The pool's swell is analytic, so it cannot break, carry foam or be splashed
-  through; the field under it is quiet between events.
 - The pool's field is 256 texels across 38 m, so the pool carries nothing shorter than
   about 60 cm; below that the surface's own detail is a shading trick, not water
   that moves. Its copy for the CPU is 128 texels of height and foam with one
@@ -225,9 +222,18 @@ Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
   What is left is the build itself: the geometry lost `computeTangents`, which
   was two thirds of the sheet and less true than the ring's own frame.
 
-- Step 2: the pool's swell. It is analytic, so the pool's only permanent motion
-  cannot break, cannot carry foam, and a splash ring passes through it without
-  touching it. Into the field, the way the flume's chute chop is held.
+- Step 2 (PR #42): the pool's swell. It was analytic, laid over a field that
+  knew nothing about it: it could not break, wrote no foam, and a splash ring
+  ran through it without the two ever meeting. It is the field's rest line now —
+  the line the pull to level and the curvature term measure the water against,
+  which is what a wave operator can hold a standing pattern against at all — so
+  the field carries the whole surface. A crest breaks on the slope the swell and
+  a ring make together, the wall is lapped by the water actually standing
+  against it, and the copy the game reads is the surface with nothing added to
+  it: `chopAt` and `chopSlopeAt` are the field and nothing else, and the CPU
+  twin of the wave sum is gone. That copy is read while a fresh pool is still
+  catching up, so the game has its water before it can see it. With one water
+  model left, `?ripples=analytic` and the ring wake it needed go with it.
 
 - Step 3: the flume's field, read back. The pool's field moves the rider; the
   sheet's is seen and nothing else — the bow does not push, the chop does not
