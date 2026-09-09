@@ -79,6 +79,10 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 5.4, the sheet in the tube (Step 4) | tube | webgl | 302 (3.1) | 197 (4.9) |
 | 5.4, the sheet in the tube (Step 4) | pool | webgpu | 113 (1.4) | 87 (0.8) |
 | 5.4, the sheet in the tube (Step 4) | pool | webgl | 145 (6.1) | 89 (10.4) |
+| 5.5, the water moves (Step 5) | tube | webgpu | 327 (0.6) | 200 (1.0) |
+| 5.5, the water moves (Step 5) | tube | webgl | 306 (3.0) | 193 (4.9) |
+| 5.5, the water moves (Step 5) | pool | webgpu | 139 (0.8) | 85 (0.8) |
+| 5.5, the water moves (Step 5) | pool | webgl | 140 (2.8) | 86 (7.6) |
 
 Notes:
 
@@ -178,6 +182,10 @@ Notes:
   look — one refracted through the water, one reflected off the far side of the tube. Its
   geometry is the tube's own, cloned and displaced, and the tube went from 10 to 16 radial
   segments so the waterline is not faceted.
+
+- Build 5 Step 5 is free in the field pass: advecting the height and the velocity as well as
+  the foam replaces two reads with one, and the flow field it advects along costs a handful of
+  ALU. The current strips are gone, which is three fewer draw calls a pool.
 
 - Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
   twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution

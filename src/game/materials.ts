@@ -451,9 +451,15 @@ export function createBasinMaterial(
     .add(0.5);
   const grain = mx_noise_float(p.mul(1.3)).mul(0.5).add(0.5);
   const weights = pool.strata + pool.erosion + pool.grain;
-  // Grain is left out of the relief: at wall distances its wavelength is under
-  // a pixel and the derivative is noise.
-  const relief = strata.mul(pool.strata).add(erosion.mul(pool.erosion)).div(weights);
+  // Grain joins the relief only in the last few metres. Across the pool its
+  // wavelength is under a pixel and the derivative is noise; with a rider
+  // drifted up against the wall it is the only thing there is to see.
+  const near = smoothstep(6, 1.5, length(cameraPosition.sub(p)));
+  const relief = strata
+    .mul(pool.strata)
+    .add(erosion.mul(pool.erosion))
+    .add(grain.mul(pool.grain).mul(near))
+    .div(weights);
   // The rock's tones are close together in a dark basin, so the mix is pushed
   // out to the ends of its range before it reaches a colour.
   const tone = smoothstep(0.28, 0.74, relief.add(grain.mul(pool.grain / weights)));
@@ -536,68 +542,7 @@ export function createExitRingMaterial(theme: Theme): THREE.MeshStandardNodeMate
   return mat;
 }
 
-export function createCurrentMaterial(theme: Theme): THREE.MeshBasicNodeMaterial {
-  const mat = new THREE.MeshBasicNodeMaterial({
-    color: theme.ring,
-    map: currentTexture(),
-    transparent: true,
-    opacity: theme.exit.current,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-  });
-  // Bloom reads the emissive target and an unlit strip writes none, so hand
-  // it the strip's own colour and alpha, given up as the rider paddles over it.
-  // The colour target is named too: a material MRT that names no target the
-  // framebuffer actually has compiles to an empty fragment struct, which is a
-  // WGSL error wherever the renderer draws without MRT (?post=0, and inside
-  // the pool's reflection pass).
-  mat.mrtNode = mrt({ ...colorTargets(output), emissive: output.mul(glowFalloff()) });
-  return mat;
-}
-
-let currentTex: THREE.CanvasTexture | null = null;
-
-/** Soft dashes along v, fading at the sides; scrolled toward a mouth it reads as surface current. */
-export function currentTexture(): THREE.CanvasTexture {
-  if (currentTex) return currentTex;
-  const w = 64;
-  const h = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, w, h);
-  for (let i = 0; i < 3; i++) {
-    const y0 = i * (h / 3) + 10;
-    const g = ctx.createLinearGradient(0, y0, 0, y0 + 56);
-    g.addColorStop(0, "rgba(255,255,255,0)");
-    g.addColorStop(0.5, "rgba(255,255,255,0.9)");
-    g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(14, y0, w - 28, 56);
-  }
-  ctx.globalCompositeOperation = "destination-in";
-  const side = ctx.createLinearGradient(0, 0, w, 0);
-  side.addColorStop(0, "rgba(0,0,0,0)");
-  side.addColorStop(0.5, "rgba(0,0,0,1)");
-  side.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = side;
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = "source-over";
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  currentTex = tex;
-  return tex;
-}
-
-/**
- * Advance the shared per-frame state: the current strips flow toward their
- * mouths and the film's idle trickle ticks on every tube and mouth.
- */
+/** Advance the shared clock the film's idle trickle and the panels drift on. */
 export function scrollCurrents(dt: number) {
-  const tex = currentTexture();
-  tex.offset.y = (((tex.offset.y - dt * 0.42) % 1) + 1) % 1;
   uClock.value += dt;
 }

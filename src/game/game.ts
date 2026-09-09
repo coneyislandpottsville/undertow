@@ -66,6 +66,14 @@ const UNDER_FOV = 6;
 /** Bubbles a second at the head of the plume torn under at a splash, and how long it lasts. */
 const PLUNGE_BUBBLES = 6000;
 const PLUME_TIME = 1.1;
+/** Share of the rider's speed the water they are paddling through is dragged at. */
+const PADDLE_PUSH = 0.55;
+/**
+ * Share of the pool's current a floating rider is carried at. Enough that
+ * hands off the keys the water takes them to a mouth rather than leaving them
+ * parked against the wall.
+ */
+const DRIFT = 1.2;
 /** Radius of the crater a rider punches into the pool, m, and drops raining back after. */
 const SPLASH_RADIUS = 2;
 const SPLASH_DROPS = 14;
@@ -101,6 +109,7 @@ const _qDown = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
 const _themeColor = new THREE.Color();
+const _flow = new THREE.Vector2();
 const _under = new THREE.Vector3();
 const _bubbleAt = new THREE.Vector3();
 const _white = new THREE.Vector3(1, 1, 1);
@@ -922,15 +931,14 @@ export class Game {
     // A rider who paddled out at the rim leaves the vortex still turning; it
     // fills back in under them rather than snapping flat.
     this.whirlEnergy = Math.max(0, this.whirlEnergy - dt * 0.55);
-    const near = this.nearestExit();
-    if (near) {
-      // Gentle surface current from the middle of the pool out toward the nearest mouth.
-      const cx = near.position.x - pool.center.x;
-      const cz = near.position.z - pool.center.z;
-      const cl = Math.hypot(cx, cz) || 1;
-      this.px += (cx / cl) * 0.45 * dt;
-      this.pz += (cz / cl) * 0.45 * dt;
+    // The rider floats on the water, so they go where it goes: the same
+    // current that advects the surface, at a share of it.
+    const flow = this.poolSurface?.currentAt(this.px, this.pz, this.whirlEnergy, _flow);
+    if (flow) {
+      this.px += flow.x * DRIFT * dt;
+      this.pz += flow.y * DRIFT * dt;
     }
+    const near = this.nearestExit();
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
     const r = Math.hypot(dx, dz);
@@ -1087,12 +1095,7 @@ export class Game {
     this.updateSubmersion(dt);
     this.applyFov();
     this.cavern.position.copy(this.camera.position);
-    this.current.tick(
-      dt,
-      this.clock.elapsed,
-      this.mode === "slide" ? this.speed : 0,
-      THREE.MathUtils.clamp(this.whirlEnergy, 0, 1),
-    );
+    this.current.tick(dt, this.clock.elapsed, this.mode === "slide" ? this.speed : 0);
     this.updatePoolSurface(dt);
     this.updateSpray(dt);
     this.audio.update(this.speed, this.mode, this.mode === "whirl" ? this.whirlSpin : 0);
@@ -1130,6 +1133,14 @@ export class Game {
             1.2,
           );
     surface.setFloatie(this.px, this.pz, this.mode !== "slide", stir);
+    // Paddling pushes the water: the rider drags what they are sitting in along
+    // with them, and it takes the foam and the ripples with it.
+    if (this.mode === "paddle") {
+      _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      surface.setPush(_fwd.x * this.speed * PADDLE_PUSH, _fwd.z * this.speed * PADDLE_PUSH);
+    } else {
+      surface.setPush(0, 0);
+    }
     // The splash, in the order the water does it.
     if (this.splashPlan.length) {
       this.splashClock += dt;
