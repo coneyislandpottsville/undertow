@@ -67,6 +67,10 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 5.1, under the surface (Step 1) | tube | webgl | 346 (2.7) | 214 (4.5) |
 | 5.1, under the surface (Step 1) | pool | webgpu | 149 (0.8) | 91 (0.8) |
 | 5.1, under the surface (Step 1) | pool | webgl | 163 (7.0) | 102 (11.0) |
+| 5.2, foam the water carries (Step 2) | tube | webgpu | 345 (0.5) | 212 (1.0) |
+| 5.2, foam the water carries (Step 2) | tube | webgl | 333 (2.8) | 212 (4.7) |
+| 5.2, foam the water carries (Step 2) | pool | webgpu | 149 (0.9) | 87 (1.6) |
+| 5.2, foam the water carries (Step 2) | pool | webgl | 147 (3.8) | 93 (3.1) |
 
 Notes:
 
@@ -150,6 +154,13 @@ Notes:
   rather than adding one. The tube phase is untouched — nothing of it runs above the water line.
   The 5.0 rows are Build 4 re-measured on the same machine the same day, so the pair is
   comparable; the recorded 4.5 rows were taken on a colder run.
+
+- Build 5 Step 2 costs the pool phase another 0.5 ms on WebGPU and 0.9 ms on the WebGL 2 tier,
+  and moves the height field from compute buffers to a 256² half-float target ping-ponged by a
+  full-screen pass, up to three passes a frame. The WebGL 2 tier gains the height field it never
+  had and its GPU time drops from 11.0 to 3.1 ms, because the transform-feedback path is gone;
+  the extra render calls cost it CPU instead. Foam is a fourth channel of the same target, so it
+  is one pass for both.
 
 - Step 3 adds about 0.5 ms (2560×1080) to 0.9 ms (3440×1440) of GPU time on WebGPU and roughly
   twice that on the WebGL 2 backend (MRT scene pass into half-float targets, a half-resolution

@@ -35,6 +35,8 @@ export type PoolData = {
   center: THREE.Vector3;
   radius: number;
   waterY: number;
+  /** Where the flume pours into the pool, on the water line. */
+  inflow: THREE.Vector3;
 };
 
 export type RideSection = {
@@ -332,7 +334,9 @@ function addSplash(points: THREE.Vector3[], rng: Rng, tubeRadius: number): PoolD
   splash.y = waterY + 1.35;
   points.push(splash);
 
-  return { center, radius, waterY };
+  const inflow = center.clone().addScaledVector(inward, -(radius - 3.4));
+  inflow.y = waterY;
+  return { center, radius, waterY, inflow };
 }
 
 const FEATURES: Feature[] = ["drop", "sweep", "s", "helix", "loop", "hump"];

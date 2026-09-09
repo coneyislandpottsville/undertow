@@ -87,7 +87,6 @@ Phase 3 is complete.
 
 Open:
 
-- Foam exists only on the funnel, and blows out to white in the near field.
 - The splash is one impulse, a burst of droplets and eight raining drops.
 - The tube's film is a shading trick on a dry wall: no body, no leading edge.
 - Nothing in the pool flows; the current toward the mouths is painted dashes.
@@ -209,6 +208,19 @@ not. Hold 60 fps at 3440×1440 with MSAA on.
   wobbles and closes in, the mix drops through a lowpass, and the rig throws
   bubbles that rise and burst at the line. The surface also stops being cut at
   the wall, which showed as a hard edge whenever the swell was up.
+
+- Step 2 (PR #21): foam the water carries. It is written where the water is
+  disturbed — under the flume, behind the rider, at the funnel's lip, at every
+  splash, lapping the wall — drifts along the pool's own flow, and fades; the
+  spiral arms of a whirlpool are that ring of foam being drawn out rather than a
+  pattern painted in the shape of one. Coverage decides how much of a two-scale
+  world-space grain the foam eats, so a patch is a scatter of bubbles that
+  closes up rather than the sheet of ring colour that blew out the near field.
+  The field it lives in is a 256² half-float target stepped by a full-screen
+  pass, carrying the shallow-water height and velocity as well, because a
+  compute kernel on the WebGL 2 backend reads its storage buffers back as zero:
+  that tier had no height field at all, and now has the same one. `?foam=`
+  scales it.
 
 ### 6. Mobile (parked)
 
