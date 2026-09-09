@@ -103,8 +103,16 @@ surfaces are measured in; the whirlpool itself is a seven-second transient at th
 | 6.5, the splash sounds like what it does (Step 5) | tube | webgl | 329 (2.8) | 206 (4.7) |
 | 6.5, the splash sounds like what it does (Step 5) | pool | webgpu | 167 (0.4) | 98 (0.6) |
 | 6.5, the splash sounds like what it does (Step 5) | pool | webgl | 161 (5.3) | 103 (8.6) |
+| 6.6, the six themes calibrated (Step 6) | tube | webgpu | 330 (0.5) | 207 (0.8) |
+| 6.6, the six themes calibrated (Step 6) | tube | webgl | 330 (2.9) | 207 (4.6) |
+| 6.6, the six themes calibrated (Step 6) | pool | webgpu | 156 (0.7) | 99 (0.6) |
+| 6.6, the six themes calibrated (Step 6) | pool | webgl | 159 (5.3) | 103 (8.7) |
 
 Notes:
+
+- Build 6 Step 6 is numbers, not work: one more multiply on the sheet's mirror. Build 6 closes
+  with the pool phase at 10.2 ms of 16.7 on WebGPU and 9.7 on the WebGL 2 tier, and the tube at
+  4.8 on both, against a 16.7 ms budget.
 
 - Build 6 Step 5 draws nothing: four filtered noise bursts on the schedule the splash already
   runs. The row is here so the series has no gap in it.
