@@ -2,10 +2,13 @@
  * Procedural ride audio built from filtered noise, so it ships with no assets.
  * Unlocks on the first user gesture. Layers: a speed-driven water rush (rumble
  * plus hiss), a whirlpool roar with a spin-rate wobble, the body of water heard
- * from inside it, and one-shot splash, plunge, breach, paddle-stroke and
- * exit-whoosh bursts.
+ * from inside it, and one-shot plunge, breach, paddle-stroke and exit-whoosh
+ * bursts. A splash is four of them on the water's own schedule.
  */
 type Mode = "slide" | "whirl" | "paddle";
+
+/** The four voices of a splash, in the order the water makes them. */
+export type SplashPart = "impact" | "column" | "ring" | "drop";
 
 type Layer = { filter: BiquadFilterNode; gain: GainNode };
 
@@ -145,9 +148,34 @@ export class RideAudio {
     this.oneShot({ type: "bandpass", from: 700, to: 2600, q: 0.8, peak: 0.42, attack: 0.01, decay: 0.3 });
   }
 
-  /** Hitting the pool: a heavy, brief burst that darkens as it decays. */
-  splash() {
-    this.oneShot({ type: "lowpass", from: 2600, to: 240, q: 0.7, peak: 0.9, attack: 0.01, decay: 0.7 });
+  /**
+   * What a splash does, on the schedule the water does it in: the body hitting
+   * the pool, the column the crater throws back up as it closes, the ring its
+   * collapse leaves running for the wall, and each drop landing back over the
+   * second after. `pitch` shifts a drop, so a shower is not a metronome.
+   */
+  splashPart(part: SplashPart, pitch = 1) {
+    if (part === "impact") {
+      // The whole body arriving: heavy, brief, and darkening as it decays.
+      this.oneShot({ type: "lowpass", from: 2600, to: 240, q: 0.7, peak: 0.9, attack: 0.01, decay: 0.7 });
+    } else if (part === "column") {
+      // Water thrown up and falling back: a body of it, rising then closing.
+      this.oneShot({ type: "bandpass", from: 380, to: 1500, q: 0.8, peak: 0.42, attack: 0.05, decay: 0.4 });
+    } else if (part === "ring") {
+      // The crater closing on itself, heard as a low thud running outward.
+      this.oneShot({ type: "lowpass", from: 900, to: 150, q: 0.9, peak: 0.36, attack: 0.03, decay: 0.9 });
+    } else {
+      // A drop landing: short, resonant, and gone.
+      this.oneShot({
+        type: "bandpass",
+        from: 850 * pitch,
+        to: 2400 * pitch,
+        q: 3.4,
+        peak: 0.13,
+        attack: 0.004,
+        decay: 0.1,
+      });
+    }
   }
 
   /** A paddle stroke: short, watery, mid-band. */

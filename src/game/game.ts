@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 import { FrameMeter, type LabApi } from "@/lab/harness";
-import { RideAudio } from "./audio";
+import { RideAudio, type SplashPart } from "./audio";
 import { exitSeed, generateSection, startPose, type RideSection } from "./generate";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
@@ -246,6 +246,10 @@ export class Game {
     amplitude: number;
     shape: number;
     spray?: "crown" | "column";
+    /** What the water is doing here, for the ear: the audio hangs off the same schedule. */
+    sound?: SplashPart;
+    /** How high the drop rings, so a shower of them is not a metronome. */
+    pitch?: number;
   }[] = [];
   private splashClock = 0;
   /** Metres the seat is held below where it floats; a splash drives it, buoyancy returns it. */
@@ -835,7 +839,6 @@ export class Game {
     this.trauma = Math.max(this.trauma, 0.55);
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
-    this.audio.splash();
     this.planSplash(this.px, this.pz);
     // The rider goes under: whatever downward speed the flume left them with,
     // inside a band, so the splash is always a dunk and a fast one is deeper.
@@ -911,9 +914,35 @@ export class Game {
     const plan = this.splashPlan;
     plan.length = 0;
     this.splashClock = 0;
-    plan.push({ at: 0, x, z, radius: SPLASH_RADIUS, amplitude: 0.8, shape: 1, spray: "crown" });
-    plan.push({ at: 0.3, x, z, radius: 0.65, amplitude: 0.5, shape: 0, spray: "column" });
-    plan.push({ at: 0.62, x, z, radius: SPLASH_RADIUS * 0.8, amplitude: -0.2, shape: 1 });
+    plan.push({
+      at: 0,
+      x,
+      z,
+      radius: SPLASH_RADIUS,
+      amplitude: 0.8,
+      shape: 1,
+      spray: "crown",
+      sound: "impact",
+    });
+    plan.push({
+      at: 0.3,
+      x,
+      z,
+      radius: 0.65,
+      amplitude: 0.5,
+      shape: 0,
+      spray: "column",
+      sound: "column",
+    });
+    plan.push({
+      at: 0.62,
+      x,
+      z,
+      radius: SPLASH_RADIUS * 0.8,
+      amplitude: -0.2,
+      shape: 1,
+      sound: "ring",
+    });
     // Where the drops land is part of the run, not of the frame: a seed lays
     // down the same foam and the same ripples every time it is played.
     const rng = new Rng(forkSeed(this.current.seed, SPLASH_SALT));
@@ -927,6 +956,8 @@ export class Game {
         radius: 0.35,
         amplitude: 0.05,
         shape: 0,
+        sound: "drop",
+        pitch: rng.range(0.7, 1.5),
       });
     }
     plan.sort((a, b) => a.at - b.at);
@@ -1197,6 +1228,7 @@ export class Game {
       while (this.splashPlan.length && this.splashPlan[0]!.at <= this.splashClock) {
         const e = this.splashPlan.shift()!;
         surface.impulse(e.x, e.z, e.radius, e.amplitude, e.shape);
+        if (e.sound) this.audio.splashPart(e.sound, e.pitch);
         if (e.spray === "crown") {
           _tmp.set(e.x, waterY + 0.2, e.z);
           this.spray?.splash(_tmp, 1, e.radius);
