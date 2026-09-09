@@ -26,6 +26,7 @@ import {
   normalize,
   normalView,
   output,
+  positionLocal,
   positionView,
   positionWorld,
   pow,
@@ -261,13 +262,46 @@ export function createTubeMaterial(
 }
 
 /**
+ * Metres of tube the rider's bow wave and the trough under them spread over.
+ *
+ * The sheet is the tube's own geometry and its rings are a metre or two apart,
+ * so nothing narrower than a few of them survives being drawn.
+ */
+const PLOUGH_SPAN = 4;
+/** Spans ahead the bow stands and behind the trough sits. */
+const PLOUGH_BOW_AT = 0.7;
+const PLOUGH_TROUGH_AT = -0.15;
+/** How high the bow stands and how deep the trough cuts, relative to each other. */
+const PLOUGH_BOW = 1;
+const PLOUGH_TROUGH = 1.3;
+/**
+ * What share of the water that is there the rider moves. A share and not a
+ * depth: there is only so much to plough, and in airtime, where the sheet has
+ * all but left the wall, a trough cut in metres would take water that is not
+ * there and leave the tube dry.
+ */
+const PLOUGH_SHARE = 0.5;
+/** The wake behind: waves per span, how far back they carry, and how tall. */
+const PLOUGH_WAVES = 3;
+const PLOUGH_CARRY = 1.1;
+const PLOUGH_WAKE = 0.45;
+
+/** Per-material rider state, set by ploughSheet(): where along, how hard, apparent g. */
+const ploughs = new WeakMap<THREE.Material, { value: THREE.Vector3 }>();
+
+/**
  * The sheet of water the flume runs, as a surface of its own.
  *
- * The geometry is the tube's, displaced onto the plane the water levels at in
- * each ring's own apparent gravity, so it has a leading edge where it runs out
- * against the wall and a body between there and the wall. `aDepth` is how much
- * water is under each vertex, which is what the wall behind it is absorbed by
- * and what the edge is cut on.
+ * The geometry is the tube's, levelled in the vertex stage onto the plane the
+ * water stands at in each ring's apparent gravity, so it has a leading edge
+ * where it runs out against the wall and a body between there and the wall. How
+ * far each vertex had to rise is how much water is over it, which is what the
+ * wall behind is absorbed by and what the edge is cut on.
+ *
+ * The rider ploughs it: water piles ahead of them, the trough closes behind
+ * into a wake, and the water around them levels to the gravity they are
+ * actually pulling rather than the one their section was drawn for — so a
+ * brake, a fast entry and their own bow wave all show in the water.
  */
 export function createSheetMaterial(
   theme: Theme,
@@ -277,9 +311,35 @@ export function createSheetMaterial(
   const sheet = theme.sheet;
   const uFlow = uniform(0);
   const flowDist = uFlow.add(uClock.mul(FILM_IDLE));
-  // @types/three types a named attribute as Node<string>; the shader knows it
-  // is the float the geometry writes.
-  const depth = attribute("aDepth", "float") as unknown as Node<"float">;
+  /** Where the rider is along the tube (0 to 1, negative for nowhere), how hard they plough, their g. */
+  const uPlough = uniform(new THREE.Vector3(-1, 0, 1));
+
+  // @types/three types a named attribute as Node<string>; the shader knows what
+  // the geometry wrote.
+  const nominalG = attribute("aG", "float") as unknown as Node<"float">;
+  const down = attribute("aDown", "vec3") as unknown as Node<"vec3">;
+  const up = down.negate();
+  // Spans of tube from the rider, forward positive. Everything the rider does
+  // to the water is a shape in this.
+  const s = uv().x.sub(uPlough.x).mul(length / PLOUGH_SPAN);
+  const bell = (x: Node<"float">) => exp(x.mul(x).negate());
+  const behind = smoothstep(0.15, -0.15, s);
+  const plough = bell(s.sub(PLOUGH_BOW_AT))
+    .mul(PLOUGH_BOW)
+    .sub(bell(s.sub(PLOUGH_TROUGH_AT)).mul(PLOUGH_TROUGH))
+    .add(sin(s.mul(PLOUGH_WAVES)).mul(exp(s.min(0).mul(PLOUGH_CARRY))).mul(behind).mul(PLOUGH_WAKE))
+    .mul(uPlough.y);
+  // Close to the rider the water answers the gravity they are pulling now; far
+  // from them it keeps the one the section was drawn for.
+  const g = mix(nominalG, uPlough.z, bell(s.mul(0.6)).mul(uPlough.y.min(1)));
+  const stand = float(radius * sheet.depth)
+    .add(g.mul(radius * sheet.depthG))
+    .mul(plough.mul(PLOUGH_SHARE).add(1))
+    .max(0);
+  // The surface is that plane, so a wall vertex rises to it by whatever it is
+  // short; the ones already above it stay dry.
+  const lift = stand.sub(radius).sub(normalLocal.dot(up).mul(radius)).max(0);
+  const depth = vertexStage(lift);
 
   const ripple = flowNormal(uv(), flowDist, length, radius);
   // The wall through the water, pushed about by the ripples: the deeper the
@@ -299,7 +359,9 @@ export function createSheetMaterial(
   // and a crest of foam where it runs out against the wall. The ripples go in
   // through the geometry's own tangent frame, which runs along the tube, so
   // they streak with the flow rather than across it.
-  const flat = normalize(transformDirection(normalLocal, modelWorldMatrix));
+  // Its surface is the plane the water levelled to, which is across the ring's
+  // apparent gravity, not the wall it is lying on.
+  const flat = normalize(transformDirection(vertexStage(up), modelWorldMatrix));
   const tangent = attribute("tangent", "vec4") as unknown as Node<"vec4">;
   const along = normalize(transformDirection(tangent.xyz, modelWorldMatrix));
   const across = normalize(cross(flat, along));
@@ -330,6 +392,7 @@ export function createSheetMaterial(
     side: THREE.DoubleSide,
     depthWrite: false,
   });
+  mat.positionNode = positionLocal.add(up.mul(lift));
   const glow = look.panel.mul(theme.screen.glow).mul(absorb);
   mat.colorNode = mix(body, mirrored, fresnel)
     .add(color(theme.ring).mul(glint))
@@ -341,7 +404,17 @@ export function createSheetMaterial(
     emissive: vec4(glow.add(color(theme.ring).mul(foam.mul(0.6).add(glint.mul(0.5)))), 1),
   });
   flows.set(mat, uFlow);
+  ploughs.set(mat, uPlough);
   return mat;
+}
+
+/**
+ * Tell the section's sheet where the rider is: `along` from 0 to 1 down the
+ * tube and negative for a section they are not in, `hard` how much water they
+ * are pushing, `g` the apparent gravity they are pulling.
+ */
+export function ploughSheet(mat: THREE.Material, along: number, hard: number, g: number) {
+  ploughs.get(mat)?.value.set(along, hard, g);
 }
 
 /** Push the section's film along at a share of rider speed; call each frame for the section being ridden. */
