@@ -1,4 +1,4 @@
-import { PALETTES, type Palette } from "@/game/palette";
+import { THEMES, type Theme } from "@/game/theme";
 
 /**
  * Shared contract for the lab prototypes under /lab. Renderer-agnostic on
@@ -13,7 +13,7 @@ export type LabParams = {
   /** Drawing-buffer override from `?res=WxH` (0 = follow the window). */
   width: number;
   height: number;
-  palette: Palette;
+  theme: Theme;
   msaa: boolean;
   query: URLSearchParams;
   num: (name: string, fallback: number) => number;
@@ -44,9 +44,9 @@ export function parseLabParams(search: string = window.location.search): LabPara
     width = Number(m[1]);
     height = Number(m[2]);
   }
-  const id = str("palette", PALETTES[0]!.id);
-  const palette = PALETTES.find((p) => p.id === id) ?? PALETTES[0]!;
-  return { backend, width, height, palette, msaa: on("msaa", true), query, num, str, on };
+  const id = str("theme", THEMES[0]!.id);
+  const theme = THEMES.find((p) => p.id === id) ?? THEMES[0]!;
+  return { backend, width, height, theme, msaa: on("msaa", true), query, num, str, on };
 }
 
 export type LabInfo = {

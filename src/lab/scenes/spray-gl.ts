@@ -11,7 +11,7 @@ import { addLights, applyRideFov, disposeAll } from "./shared-gl";
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;
-  const palette = params.palette;
+  const theme = params.theme;
   const R = 16;
   const N = Math.min(1_000_000, Math.max(1000, Math.floor(params.num("n", 50000))));
   const M = Math.max(0, Math.floor(params.num("mist", 48)));
@@ -21,14 +21,14 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const maxLife = 1.8;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  const { rider } = addLights(scene, camera, palette);
+  const { rider } = addLights(scene, camera, theme);
 
   const wallMat = new THREE.MeshStandardMaterial({
-    color: palette.wall,
+    color: theme.wall,
     roughness: 0.72,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -39,10 +39,10 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const water = new THREE.Mesh(
     new THREE.CircleGeometry(R - 0.05, 64),
     new THREE.MeshStandardMaterial({
-      color: palette.water,
+      color: theme.water,
       roughness: 0.15,
       metalness: 0.2,
-      emissive: new THREE.Color(palette.water),
+      emissive: new THREE.Color(theme.water),
       emissiveIntensity: 0.25,
     }),
   );
@@ -50,7 +50,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   scene.add(water);
   const lip = new THREE.Mesh(
     new THREE.TorusGeometry(R, 0.38, 8, 96),
-    new THREE.MeshStandardMaterial({ color: palette.ring, roughness: 0.35, metalness: 0.15 }),
+    new THREE.MeshStandardMaterial({ color: theme.ring, roughness: 0.35, metalness: 0.15 }),
   );
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
@@ -169,7 +169,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     mistMat.uniforms.uSize!.value = 3.2;
     mistMat.uniforms.uSoft!.value = 2.0;
     mistMat.uniforms.uAlpha!.value = 0.035;
-    mistMat.uniforms.uColor!.value = new THREE.Color(palette.ring);
+    mistMat.uniforms.uColor!.value = new THREE.Color(theme.ring);
     mist = new THREE.Points(mg, mistMat);
     mist.frustumCulled = false;
     scene.add(mist);

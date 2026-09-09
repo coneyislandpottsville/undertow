@@ -57,7 +57,7 @@ export function LabView({ title, node, gl, notes = [] }: Props) {
         backend: p.backend,
         width: p.width,
         height: p.height,
-        palette: p.palette.id,
+        theme: p.theme.id,
         msaa: p.msaa,
       },
       stats: () =>

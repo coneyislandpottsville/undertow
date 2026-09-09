@@ -19,15 +19,15 @@ import {
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;
-  const palette = params.palette;
+  const theme = params.theme;
   const radius = 2.75;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  addLights(scene, camera, palette);
+  addLights(scene, camera, theme);
 
   const curve = loopCurve();
   const L = curve.getLength();
@@ -43,12 +43,12 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const uTime = { value: 0 };
   const uFlow = { value: params.num("flow", 6) };
   const uRefract = { value: params.num("refract", 0.06) };
-  const uTint = { value: new THREE.Color(palette.water).multiplyScalar(1.3) };
+  const uTint = { value: new THREE.Color(theme.water).multiplyScalar(1.3) };
   const cycle = 1.5;
 
   const material = new THREE.MeshPhysicalMaterial({
     map: streakTex,
-    color: palette.tube,
+    color: theme.tube,
     normalMap: rippleTex,
     roughness: 0.07,
     metalness: 0.05,

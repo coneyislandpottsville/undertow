@@ -33,18 +33,18 @@ type V2 = Node<"vec2">;
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
-  const palette = params.palette;
+  const theme = params.theme;
   const R = 16;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(palette.fog, 0.012);
-  scene.background = new THREE.Color(palette.fog);
+  scene.fog = new THREE.FogExp2(theme.fog, 0.012);
+  scene.background = new THREE.Color(theme.fog);
   const camera = new THREE.PerspectiveCamera(80, 1, 0.08, 260);
   scene.add(camera);
-  addLights(scene, camera, palette);
+  addLights(scene, camera, theme);
 
   const wallMat = new THREE.MeshStandardNodeMaterial({
-    color: palette.wall,
+    color: theme.wall,
     roughness: 0.72,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -58,7 +58,7 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   scene.add(floor);
   const lip = new THREE.Mesh(
     new THREE.TorusGeometry(R, 0.38, 8, 96),
-    new THREE.MeshStandardNodeMaterial({ color: palette.ring, roughness: 0.35, metalness: 0.15 }),
+    new THREE.MeshStandardNodeMaterial({ color: theme.ring, roughness: 0.35, metalness: 0.15 }),
   );
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
@@ -114,9 +114,9 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     .clamp(0, 1)
     .mul(uEnergy.mul(0.7).add(0.3));
 
-  const throatCol = color(palette.fog);
-  const waterCol = color(palette.water);
-  const foamCol = color(palette.ring);
+  const throatCol = color(theme.fog);
+  const waterCol = color(theme.water);
+  const foamCol = color(theme.ring);
   const base = mix(throatCol, waterCol, smoothstep(0.0, 1.6, rho.div(sigma)));
 
   const waterMat = new THREE.MeshStandardNodeMaterial({ metalness: 0.1, roughness: 0.12 });
