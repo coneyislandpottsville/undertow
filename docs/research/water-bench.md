@@ -1,27 +1,14 @@
 # Lab bench
 
-Generated 2026-09-08T20:49:30.283Z with chrome 152.0.7977.76, vsync and frame-rate limit disabled, 6 s samples after 2.5 s warm-up.
+Generated 2026-09-09T20:13:19.220Z with chrome 152.0.7977.83, vsync and frame-rate limit disabled, 6 s samples after 2.5 s warm-up.
 
 GPU:  (WebGPU); ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 (0x00001F03) Direct3D11 vs_5_0 ps_5_0, D3D11) (WebGL 2, timer query yes).
 
 | Prototype | Backend | 2560×1080 | 3440×1440 |
 | --- | --- | --- | --- |
-| ride today (Build 2, WebGLRenderer) | glsl | 1322 fps | 785 fps |
-| whirlpool | webgpu | 840 fps / 0.9 ms gpu | 509 fps / 1.5 ms gpu |
-| whirlpool | webgl | 883 fps / 1.1 ms gpu | 752 fps / 2.1 ms gpu |
-| pool analytic | webgpu | 820 fps | 258 fps / 1.1 ms gpu |
-| pool analytic | webgl | 543 fps / 1.9 ms gpu | 388 fps / 3.2 ms gpu |
-| pool compute | webgpu | 425 fps / 0.7 ms gpu | 218 fps / 1.9 ms gpu |
-| pool compute | webgl | 497 fps / 2.2 ms gpu | 388 fps / 3.6 ms gpu |
-| film | webgpu | 826 fps / 0.9 ms gpu | 492 fps / 1.6 ms gpu |
-| film | webgl | 1084 fps / 1.0 ms gpu | 811 fps / 1.7 ms gpu |
-| film | glsl | 1741 fps / 0.6 ms gpu | 1724 fps / 1.0 ms gpu |
-| spray 50k | webgpu | 382 fps / 1.5 ms gpu | 216 fps / 2.8 ms gpu |
-| spray 50k | webgl | 554 fps / 1.8 ms gpu | 450 fps / 2.9 ms gpu |
-| spray 50k | glsl | 800 fps / 1.1 ms gpu | 485 fps / 1.9 ms gpu |
-| spray 200k | webgpu | 270 fps / 2.6 ms gpu | 155 fps / 4.5 ms gpu |
-| spray 200k | webgl | 442 fps / 3.0 ms gpu | 331 fps / 4.7 ms gpu |
-| spray 200k | glsl | 361 fps / 1.7 ms gpu | 334 fps / 2.7 ms gpu |
-| post bloom+blur | webgpu | 377 fps / 1.8 ms gpu | 222 fps / 3.1 ms gpu |
-| post bloom+blur | webgl | 350 fps / 2.7 ms gpu | 211 fps / 4.5 ms gpu |
-| post bloom+blur | glsl | 546 fps / 1.7 ms gpu | 427 fps / 3.1 ms gpu |
+| ride | webgpu | 345 fps / 0.3 ms gpu / worst 125 ms, 15 over 20 | 207 fps / 0.6 ms gpu / worst 218 ms, 9 over 20 |
+| ride | webgl | 350 fps / 2.7 ms gpu / worst 431 ms, 47 over 20 | 220 fps / 5.2 ms gpu / worst 735 ms, 16 over 20 |
+| ride pool | webgpu | 225 fps / 0.2 ms gpu / worst 106 ms, 10 over 20 | 133 fps / 0.4 ms gpu / worst 162 ms, 6 over 20 |
+| ride pool | webgl | 184 fps / 5.3 ms gpu / worst 77 ms, 53 over 20 | 139 fps / 9.0 ms gpu / worst 241 ms, 31 over 20 |
+| ride handoff | webgpu | 187 fps / 0.3 ms gpu / worst 1610 ms, 12 over 20 | 112 fps / 1.0 ms gpu / worst 1597 ms, 8 over 20 |
+| ride handoff | webgl | 352 fps / 3.1 ms gpu / worst 272 ms, 19 over 20 | 213 fps / 5.2 ms gpu / worst 517 ms, 28 over 20 |

@@ -1,7 +1,9 @@
 import * as THREE from "three/webgpu";
 import { FrameMeter, type LabApi } from "@/lab/harness";
 import { RideAudio, type SplashPart } from "./audio";
-import { exitSeed, generateSection, startPose, type RideSection } from "./generate";
+import { exitSeed, generateSection, sectionSteps, startPose, type RideSection } from "./generate";
+import { createLamps, type Lamps } from "./lamps";
+import { atSide, drawnSides, watchPassDepth } from "./warm";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
@@ -107,6 +109,12 @@ const SPLASH_DROPS = 14;
 const SPLASH_SALT = 0x5314;
 /** Bubbles a second off the rider while they are under. */
 const WAKE_BUBBLES = 1400;
+/**
+ * Milliseconds a frame spends building the section behind the next mouth. The
+ * geometry yields between meshes, so the frame overruns by at most the largest
+ * of them.
+ */
+const BUILD_BUDGET = 3;
 
 function makeFrame() {
   return {
@@ -206,6 +214,26 @@ export class Game {
   private poolSurface: PoolSurface | null = null;
   /** The flume's water, moved to the section the rider is in. */
   private sheetField: SheetField | null = null;
+  /** The pool's five lamps, moved to the pool being ridden into. */
+  private readonly lamps: Lamps;
+  /**
+   * Sections being built behind the mouths of the pool the rider is in: the
+   * geometry a few milliseconds a frame, then their shaders and pipelines, and
+   * only then into the scene. A section drawn for the first time compiles a
+   * dozen pipelines, which costs seconds of frames that never arrive.
+   */
+  /** How deep in nested renders each pass that draws the world is; see warm.ts. */
+  private readonly passDepths = new Map<THREE.Camera, number>();
+  private readonly passDepth = (camera: THREE.Camera) => this.passDepths.get(camera) ?? 0;
+  private readonly builds: {
+    /** Null for the world the ride opens in, which is in the scene already. */
+    exit: RideSection["exits"][number] | null;
+    steps: Generator<void, RideSection, void> | null;
+    section: RideSection | null;
+    /** What is left to build: one mesh for one pass, a frame apart. */
+    warms: (() => Promise<unknown>)[] | null;
+    warming: boolean;
+  }[] = [];
 
   /** Spray and mist, simulated in compute; built in start() with the surface. */
   private spray: Spray | null = null;
@@ -299,6 +327,9 @@ export class Game {
   private lampRange = 28;
   /** False until the first click: the rider waits at the tube mouth. */
   private released = false;
+  /** The click can come before the world's shaders do; the rider waits for both. */
+  private clicked = false;
+  private worldWarm = false;
   private readonly onResize = () => this.resize();
   private readonly onFs = () => this.syncFs();
   private readonly onPointerDown = () => this.focus();
@@ -356,6 +387,7 @@ export class Game {
       reset: () => this.meter.reset(),
     };
     window.__lab = this.api;
+    (window as unknown as { __renderer: unknown }).__renderer = this.renderer;
     this.renderer.setClearColor(0x071318, 1);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -410,6 +442,9 @@ export class Game {
     );
     this.scene.add(this.current.group);
     this.sections.push(this.current);
+    this.lamps = createLamps(this.scene);
+    this.lamps.attach(this.current);
+    watchPassDepth(this.scene, this.passDepths);
     this.dist = 2.4;
     this.speed = 0;
     samplePath(this.current.path, this.dist, _frame);
@@ -498,6 +533,12 @@ export class Game {
       this.spray = createSpray(this.renderer, this.scene, spray, surface.waterLineNode);
     }
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
+    // The world the ride opens in was built before there was a renderer to
+    // build shaders against: the first section, the pool surface, the spray.
+    // It is warmed like any section, over the frames the rider spends waiting
+    // at the mouth and the first flume.
+    this.builds.push({ exit: null, steps: null, section: null, warms: null, warming: false });
+
     // The shared rigs and the bloom exist only now, so the theme lands on them
     // here rather than in the constructor.
     this.applyTheme(this.current.theme, 1);
@@ -517,6 +558,9 @@ export class Game {
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     for (const s of this.sections) s.dispose();
     this.sections.length = 0;
+    for (const job of this.builds) if (job.exit?.next !== job.section) job.section?.dispose();
+    this.builds.length = 0;
+    this.lamps.dispose();
     this.poolSurface?.dispose();
     this.sheetField?.dispose();
     this.spray?.dispose();
@@ -546,10 +590,7 @@ export class Game {
     this.focused = true;
     this.canvas.focus();
     this.audio.unlock();
-    if (!this.released) {
-      this.released = true;
-      this.speed = 5;
-    }
+    this.clicked = true;
     useHud.getState().patch({ focused: true });
   }
 
@@ -706,10 +747,12 @@ export class Game {
 
   private tick() {
     const now = performance.now();
-    let dt = (now - this.clock.prev) / 1000;
+    const elapsed = (now - this.clock.prev) / 1000;
     this.clock.prev = now;
     if (this.paused) return;
-    dt = Math.min(dt, 0.1);
+    // The physics never steps more than a tenth of a second; the meter is told
+    // what the frame actually took.
+    const dt = Math.min(elapsed, 0.1);
     this.clock.elapsed += dt;
     this.clock.acc += dt;
     let steps = 0;
@@ -722,7 +765,7 @@ export class Game {
     this.present(dt);
     if (this.post) this.post.render();
     else this.renderer.render(this.scene, this.camera);
-    this.meter.tick(dt);
+    this.meter.tick(elapsed);
     if (this.gpuTiming) {
       // Resolve every frame: the query pool is per pass and overflows if resolves are skipped.
       void this.renderer
@@ -738,6 +781,10 @@ export class Game {
   private fixedUpdate(dt: number) {
     if (this.input.consumeFullscreen()) this.toggleFullscreen();
     if (!this.released) {
+      if (this.clicked && this.worldWarm) {
+        this.released = true;
+        this.speed = 5;
+      }
       this.idle();
       return;
     }
@@ -745,7 +792,7 @@ export class Game {
     else if (this.mode === "whirl") this.updateWhirl(dt);
     else this.updatePaddle(dt);
     this.trauma = Math.max(0, this.trauma - dt * 1.6);
-    this.maybePrepareExits();
+    this.prepareExits();
   }
 
   /** Held at the tube mouth until the first click: a gentle sway, no descent. */
@@ -1151,16 +1198,25 @@ export class Game {
     this.input.setKeys(["KeyW"]);
   }
 
-  private maybePrepareExits() {
-    if (this.mode !== "paddle") return;
-    const near = this.nearestExit();
-    if (!near) return;
-    const d = Math.hypot(this.px - near.position.x, this.pz - near.position.z);
-    if (d < 10) this.generateExit(near);
+  /**
+   * The section behind every mouth of the pool this flume ends in, queued from
+   * the moment the rider enters the flume rather than from ten metres out. A
+   * section takes seconds of shader building it cannot be given at the mouth,
+   * and the rider can leave by any of them.
+   */
+  private prepareExits() {
+    const nearest = [...this.current.exits].sort(
+      (a, b) => this.exitDistance(a) - this.exitDistance(b),
+    );
+    for (const exit of nearest) this.queueExit(exit);
   }
 
-  private generateExit(exit: RideSection["exits"][number]) {
-    if (exit.next) return;
+  private exitDistance(exit: RideSection["exits"][number]) {
+    return Math.hypot(this.px - exit.position.x, this.pz - exit.position.z);
+  }
+
+  private queueExit(exit: RideSection["exits"][number]) {
+    if (exit.next || this.builds.some((b) => b.exit === exit)) return;
     // Child seeds hang off the parent's seed and the exit taken, so any route
     // through the tree is the same world on every replay of `?seed=`. The mouth
     // in the pool wall is already dressed in the theme this returns.
@@ -1168,12 +1224,118 @@ export class Game {
     const start = exit.position.clone();
     const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
     start.addScaledVector(outward, -0.4);
-    const section = generateSection(seed, start, exit.tangent, exit.theme, false, [
-      this.current.pool,
-    ]);
+    this.builds.push({
+      exit,
+      steps: sectionSteps(seed, start, exit.tangent, exit.theme, false, [this.current.pool]),
+      section: null,
+      warms: null,
+      warming: false,
+    });
+  }
+
+  /**
+   * Advance the section at the head of the queue: its geometry up to this
+   * frame's budget, then its shaders, a mesh a frame, while it is still out of
+   * the scene. A frame between meshes is what keeps a build off this one:
+   * generating a shader is a dozen milliseconds and a section has a score.
+   */
+  private pumpBuilds() {
+    const job = this.builds[0];
+    // A shader can only be built for a pass that has drawn: until then the
+    // frame's target has no size, no samples and no second channel.
+    if (!job || job.warming || this.passDepths.size === 0) return;
+    if (job.steps) {
+      const deadline = performance.now() + BUILD_BUDGET;
+      let step = job.steps.next();
+      while (!step.done && performance.now() < deadline) step = job.steps.next();
+      if (!step.done) return;
+      job.steps = null;
+      job.section = step.value;
+      return;
+    }
+    if (!job.warms) {
+      // Both passes that draw the world get to build their shaders for every
+      // mesh, at every side it is drawn at: the frame's, and the reflection the
+      // pool casts.
+      const post = this.post;
+      const surface = this.poolSurface;
+      const warms: (() => Promise<unknown>)[] = [];
+      (job.section ? job.section.group : this.scene).traverse((mesh) => {
+        if (!(mesh as Partial<THREE.Mesh>).material) return;
+        // The world's own tube and sheet are on screen from the first frame and
+        // build both their sides as they are drawn. Pinning a side to warm one
+        // of those would be a blink of missing water; a section is nowhere yet.
+        const onScreen = job.section === null && !mesh.frustumCulled;
+        for (const side of onScreen ? [null] : drawnSides(mesh)) {
+          warms.push(() =>
+            atSide(mesh, side, () =>
+              post
+                ? post.warm(mesh, this.passDepth)
+                : this.renderer.compileAsync(mesh, this.camera, this.scene),
+            ),
+          );
+          if (surface) warms.push(() => atSide(mesh, side, () => surface.warm(mesh, this.passDepth)));
+        }
+      });
+      job.warms = warms;
+      return;
+    }
+    const warm = job.warms.shift();
+    if (!warm) {
+      this.builds.shift();
+      this.adopt(job.exit, job.section);
+      return;
+    }
+    job.warming = true;
+    void warm()
+      .catch(() => undefined)
+      .then(() => {
+        job.warming = false;
+      });
+  }
+
+  /**
+   * Into the scene. Called again by the queue when the section finishes
+   * warming, because a mouth reached early takes its section as it stands and
+   * leaves the rest of its shaders to be built behind the rider.
+   */
+  private adopt(exit: RideSection["exits"][number] | null, section: RideSection | null) {
+    if (!section) this.worldWarm = true;
+    if (!exit || !section || exit.next === section) return;
+    if (this.disposed || exit.next) {
+      section.dispose();
+      return;
+    }
     exit.next = section;
     this.scene.add(section.group);
     this.sections.push(section);
+  }
+
+  /**
+   * Into the scene now: the mouth was reached before its section was warm. What
+   * the queue has built of it is taken as it stands, shaders and all, rather
+   * than thrown away and built again.
+   */
+  private generateExit(exit: RideSection["exits"][number]) {
+    if (exit.next) return;
+    const job = this.builds.find((b) => b.exit === exit);
+    if (job) {
+      if (job.steps) {
+        let step = job.steps.next();
+        while (!step.done) step = job.steps.next();
+        job.section = step.value;
+        job.steps = null;
+      }
+      this.adopt(exit, job.section!);
+      return;
+    }
+    const seed = exitSeed(this.current.seed, exit.index);
+    const start = exit.position.clone();
+    const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
+    start.addScaledVector(outward, -0.4);
+    this.adopt(exit, generateSection(seed, start, exit.tangent, exit.theme, false, [
+      this.current.pool,
+    ]));
   }
 
   private enterExit(exit: RideSection["exits"][number]) {
@@ -1198,6 +1360,15 @@ export class Game {
     this.driftZ = 0;
     this.poolSurface?.attach(next);
     this.sheetField?.attach(next);
+    this.lamps.attach(next);
+    // The other mouths of the pool they just left are behind them now; the
+    // flume they are in may still have shaders to build.
+    for (let i = this.builds.length - 1; i >= 0; i--) {
+      const job = this.builds[i]!;
+      if (job.section === next || job.warming) continue;
+      job.section?.dispose();
+      this.builds.splice(i, 1);
+    }
     // The mouth was already dressed in this theme, so the tube the rider is now
     // in matches what they aimed at; the world around it catches up.
     this.themeTarget = next.theme;
@@ -1248,6 +1419,8 @@ export class Game {
     _rider.speed = sliding ? this.speed : 0;
     _rider.g = THREE.MathUtils.clamp(this.press / GRAVITY, 0, 3);
     this.current.tick(dt, this.clock.elapsed, _rider);
+    this.lamps.tick(this.clock.elapsed);
+    this.pumpBuilds();
     this.updateSheetField(dt);
     this.updatePoolSurface(dt);
     this.updateSpray(dt);

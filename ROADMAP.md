@@ -41,17 +41,18 @@ A is always screen-left. Gamepad and touch mirror the same signs.
 6. `?seed=` reproduces a whole run.
 7. Start directly in gameplay. Title screens and share art come last.
 
-## Where it stands (Build 8, September 2026)
+## Where it stands (Build 9, September 2026)
 
 Stack: TanStack Start, React 19, Three.js r186 on `WebGPURenderer` with TSL node
 materials (its WebGL 2 backend is the automatic fallback; `?backend=webgl` forces
 it), zustand HUD, Tailwind v4. No auth, no database.
 Repository: github.com/coneyislandpottsville/undertow, PRs squash-merged to main.
 
-The whole loop runs on both tiers at over four times the frame budget. The tube
-is generated, themed and dressed; the pool is a body of water the rider floats
-on, goes under, splashes into and reads through; the post stack, the spray and
-the audio all answer what the water is doing.
+The whole loop runs on both tiers at over three times the frame budget, and on
+WebGPU at the refresh rate it holds it: two frames of a fifty-second run pass
+20 ms. The tube is generated, themed and dressed; the pool is a body of water
+the rider floats on, goes under, splashes into and reads through; the post
+stack, the spray and the audio all answer what the water is doing.
 
 Knobs: `?seed=`, `?theme=`, `?screen=`, `?fade=`, `?backend=`, `?post=0`,
 `?ripples=`, `?reflect=`, `?refract=`, `?foam=`, `?spray=`, `?spraysize=`,
@@ -61,9 +62,16 @@ Open:
 
 - Progression undecided: depth counter only.
 - Mobile untested: touch keys exist, layout and performance do not.
-- The pool phase costs 9.0 ms of a 16.7 ms budget at 3440×1440 and the tube
-  phase 4.0, both with four samples. The post stack is four passes: the scene,
+- The pool phase costs 7.5 ms of a 16.7 ms budget at 3440×1440 and the tube
+  phase 4.8, both with four samples. The post stack is four passes: the scene,
   three for the glow, and the frame itself.
+- On the WebGL 2 backend the world's shaders are still built as they are drawn:
+  the pool coming into view down each flume costs a stall of about two seconds.
+  The warm-up lands on WebGPU and does not there, and why is not yet known.
+- A material bakes its theme, its flume's length and its radius in as constants,
+  so no two sections share a shader and each costs a score of them. Sampled
+  maps in place of procedural noise, and those three as uniforms, would make
+  the set finite.
 - The flume's field is 512 texels down the tube and 16 across its channel, so it
   carries nothing shorter than about a metre along it, and the chute's own chop is
   noise held over the surface rather than water arriving from anywhere.
@@ -76,6 +84,10 @@ Open:
   a frame or two, and the field's velocity is not in it.
 - Only the tube's interior is a screen. The pool wall could carry the same
   panels, and nothing sets a theme by hand.
+- The wall the water is seen through is three hand-rolled canvases: a streak, a
+  256-texel ripple normal, a 512-texel floor grid. The sheet's whole body is
+  that wall refracted, absorbed and mirrored back, so how good the water reads
+  is capped by it.
 
 ## Phases
 
@@ -134,7 +146,7 @@ against water carrying twice the energy. A crest steeper than the water can stan
 on breaks and whitens along its own line, and two ripples a fifth of a metre
 across carry the near field.
 
-### 8. The water, continued (Build 8)
+### 8. The water, continued (done in Build 8)
 
 Hold 60 fps at 3440×1440 with MSAA on.
 
@@ -184,11 +196,40 @@ Hold 60 fps at 3440×1440 with MSAA on.
   was already drawing the frame. It still runs on the emissive channel alone, and
   its targets are bytes because that channel is one.
 
-### 8. Mobile (parked)
+### 9. The water, continued (Build 9)
+
+Hold 60 fps at 3440×1440 with MSAA on, and no frame over 20 ms.
+
+- Step 1 (PR #41): the hitch. The ride measured 248 fps in the tube and would
+  still drop whole seconds of frames, because a node material's shader is built
+  against the ids of the lights that were in the scene when it was compiled, and
+  every section brought five of its own. Adding or pruning one gave every
+  material in the world a new cache key: a scene of shaders regenerated and
+  recompiled at each mouth. The pool's lamps are one rig now, moved to the pool
+  being ridden into like the surface and the flume's field, and the light count
+  fell from as many as twenty-nine to nine.
+
+  With that gone the rest is scheduling. A section is generated a few
+  milliseconds a frame from the moment the rider enters the flume that ends in
+  its pool, not from ten metres out, and every mouth of that pool is built, not
+  just the nearest. Its shaders are built off the frame, one mesh for one pass
+  at a time, and it joins the scene when they are done; the rider waits at the
+  mouth until the world they start in is built rather than watching it freeze.
+  Three things `compileAsync` gets wrong for a ride drawn through a post stack
+  had to be answered for any of it to count, and they are in `warm.ts`: it walks
+  the object the way a frame does and so misses everything culled or hidden, it
+  asks for the render context at the top of the stack rather than the one the
+  pass draws with, and it queues its work so a double-sided material is built at
+  the side the pass had already put back.
+
+  What is left is the build itself: the geometry lost `computeTangents`, which
+  was two thirds of the sheet and less true than the ring's own frame.
+
+### 10. Mobile (parked)
 
 - Touch layout, orientation handling, performance tiers.
 
-### 9. Framing
+### 11. Framing
 
 - Attract mode, seed sharing, share card.
 

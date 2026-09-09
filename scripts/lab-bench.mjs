@@ -47,11 +47,14 @@ const extraQuery = args.query ?? "";
 const CASES = [
   // The ride publishes the same window.__lab meter as the prototypes; ?gpu=1 turns its timestamp queries on.
   // "ride" samples the tube at speed; "ride pool" rides on into the pool and samples
-  // there, where the funnel, the pool surface, and the spray are on screen.
+  // there, where the funnel, the pool surface, and the spray are on screen; "ride handoff"
+  // samples the mouth itself, where a section is built and its shaders are not yet there.
   { name: "ride", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride", backend: "webgpu" },
   { name: "ride", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride", backend: "webgl" },
   { name: "ride pool", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride-pool", backend: "webgpu" },
   { name: "ride pool", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride-pool", backend: "webgl" },
+  { name: "ride handoff", path: "/", query: "backend=webgpu&seed=undertow&gpu=1", kind: "ride-handoff", backend: "webgpu" },
+  { name: "ride handoff", path: "/", query: "backend=webgl&seed=undertow&gpu=1", kind: "ride-handoff", backend: "webgl" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgpu", backend: "webgpu" },
   { name: "whirlpool", path: "/lab/whirlpool", query: "backend=webgl", backend: "webgl" },
   { name: "pool analytic", path: "/lab/pool", query: "backend=webgpu&sim=analytic", backend: "webgpu" },
@@ -142,15 +145,20 @@ for (const c of cases) {
     const row = { name: c.name, backend: c.backend, res: r.label, w: r.w, h: r.h, url };
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-      if (c.kind === "ride" || c.kind === "ride-pool") {
+      const isRide = c.kind === "ride" || c.kind === "ride-pool" || c.kind === "ride-handoff";
+      if (isRide) {
         // Release the rider and hold W so the sample covers the tube at speed.
+        // The rider waits at the mouth until the world's shaders are built.
         await page.waitForFunction(() => Boolean(window.__controlsTest), null, { timeout: 30000 });
         await page.evaluate(() => {
           window.__controlsTest.release?.();
           window.__controlsTest.setKeys?.(["KeyW"]);
         });
+        await page.waitForFunction(() => (window.__controlsTest.getSpeed?.() ?? 0) > 0, null, {
+          timeout: 120000,
+        });
       }
-      if (c.kind === "ride-pool") {
+      if (c.kind === "ride-pool" || c.kind === "ride-handoff") {
         // Ride on through the splash and the whirlpool, then let go: paddling
         // about the pool is the steady state the pool surfaces are measured in.
         await page.waitForFunction(() => window.__controlsTest.getMode?.() === "paddle", null, {
@@ -170,11 +178,24 @@ for (const c of cases) {
         } else {
           await sleep(warm * 1000);
           await page.evaluate(() => window.__lab.reset());
-          await sleep(seconds * 1000);
+          if (c.kind === "ride-handoff") {
+            // Take a mouth and ride the section beyond it: the sample is the
+            // hand-off and the flume that follows, not a steady state.
+            await page.evaluate(() => window.__controlsTest.steerTowardExit?.());
+            await page.waitForFunction(() => window.__controlsTest.getDrop?.() > 1, null, {
+              timeout: 60000,
+            });
+            await sleep(seconds * 1000);
+          } else {
+            await sleep(seconds * 1000);
+          }
           const stats = await page.evaluate(() => window.__lab.stats());
           Object.assign(row, {
             fps: stats.fps,
             frameMs: stats.frameMs,
+            p99Ms: stats.p99Ms,
+            worstMs: stats.worstMs,
+            spikes: stats.spikes,
             gpuMs: stats.gpuMs,
             drawCalls: stats.drawCalls,
             triangles: stats.triangles,
@@ -196,7 +217,7 @@ for (const c of cases) {
     rows.push(row);
     const summary = row.error
       ? `ERROR ${row.error.slice(0, 120)}`
-      : `${row.fps.toFixed(1)} fps, ${row.frameMs.toFixed(2)} ms/frame${row.gpuMs != null ? `, ${row.gpuMs.toFixed(2)} ms gpu` : ""}${row.actualBackend && row.actualBackend !== c.backend ? ` (fell back to ${row.actualBackend})` : ""}`;
+      : `${row.fps.toFixed(1)} fps, ${row.frameMs.toFixed(2)} ms/frame, p99 ${row.p99Ms.toFixed(1)}, worst ${row.worstMs.toFixed(0)}, ${row.spikes} over 20 ms${row.gpuMs != null ? `, ${row.gpuMs.toFixed(2)} ms gpu` : ""}${row.actualBackend && row.actualBackend !== c.backend ? ` (fell back to ${row.actualBackend})` : ""}`;
     console.log(`${c.name} [${c.backend}] ${r.label}: ${summary}`);
   }
 }
@@ -220,7 +241,8 @@ const fmt = (row) => {
   if (row.error) return `error`;
   const gpu = row.gpuMs != null ? ` / ${row.gpuMs.toFixed(1)} ms gpu` : "";
   const fb = row.actualBackend && row.actualBackend !== row.backend ? ` (→${row.actualBackend})` : "";
-  return `${row.fps.toFixed(0)} fps${gpu}${fb}`;
+  const spikes = row.worstMs != null ? ` / worst ${row.worstMs.toFixed(0)} ms, ${row.spikes} over 20` : "";
+  return `${row.fps.toFixed(0)} fps${gpu}${spikes}${fb}`;
 };
 const names = [...new Set(rows.map((r) => `${r.name}|${r.backend}`))];
 let md = `# Lab bench\n\n`;
