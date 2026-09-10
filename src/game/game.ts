@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { FrameMeter, type LabApi } from "@/lab/harness";
 import { RideAudio, type SplashPart } from "./audio";
-import { exitSeed, generateSection, sectionSteps, startPose, type RideSection } from "./generate";
+import { exitSeed, flumeSteps, generateSection, startPose, type RideSection } from "./generate";
 import { createLamps, type Lamps } from "./lamps";
 import { atSide, drawnSides, watchPassDepth } from "./warm";
 import { useHud, type RideMode } from "./hud-state";
@@ -181,7 +181,9 @@ export class Game {
   private whirlSpin = 0;
   private readonly radial = new THREE.Vector3();
   private readonly reducedMotion: boolean;
+  private hub!: RideSection;
   private current!: RideSection;
+  private inboundExit = -1;
   private mode: Mode = "slide";
   private dist = 2;
   private speed = 14;
@@ -339,17 +341,18 @@ export class Game {
     const pose = startPose();
     pinTheme(query.get("theme"));
     setScreenSource(query.get("screen"));
-    this.current = generateSection(
+    this.hub = generateSection(
       this.worldSeed,
       pose.position,
       pose.dir,
       themeForSeed(this.worldSeed),
       true,
     );
-    this.scene.add(this.current.group);
-    this.sections.push(this.current);
+    this.current = this.hub;
+    this.scene.add(this.hub.group);
+    this.sections.push(this.hub);
     this.lamps = createLamps(this.scene);
-    this.lamps.attach(this.current);
+    this.lamps.attach(this.hub);
     watchPassDepth(this.scene, this.passDepths);
     this.dist = 2.4;
     this.speed = 0;
@@ -811,11 +814,24 @@ export class Game {
     this.py = pool.waterY + 0.55;
     this.seatInPool();
     this.snapCam = true;
-    this.lamps.attach(this.current);
+    if (this.current !== this.hub) {
+      const spent = this.current;
+      if (this.inboundExit >= 0) this.hub.showMouth(this.inboundExit);
+      this.current = this.hub;
+      this.sheetField?.attach(this.hub);
+      this.lamps.attach(this.hub);
+      spent.dispose();
+      const i = this.sections.indexOf(spent);
+      if (i >= 0) this.sections.splice(i, 1);
+      this.inboundExit = -1;
+    }
+    this.lamps.attach(this.hub);
+    this.themeTarget = this.hub.theme;
+    this.themeFade = 0.35;
     useHud.getState().patch({
       mode: "whirl",
       hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
-      exits: this.current.exits.length,
+      exits: this.hub.exits.length,
     });
   }
 
@@ -916,11 +932,16 @@ export class Game {
     this.tiltX = 0;
     this.tiltZ = 0;
     this.seatInPool();
+    const gate = this.nearestExit();
+    if (gate) {
+      this.yaw = Math.atan2(-(gate.position.x - this.px), -(gate.position.z - this.pz));
+      this.heading = this.yaw;
+    }
     this.snapCam = true;
     useHud.getState().patch({
       mode: "paddle",
-      hint: "Paddle to a glowing exit · W/S move · A/D turn",
-      exits: this.current.exits.length,
+      hint: "Pick a glowing exit · the hole you came from is uphill · W/S move · A/D turn",
+      exits: this.hub.exits.length,
     });
   }
 
@@ -1076,7 +1097,7 @@ export class Game {
     start.addScaledVector(outward, -0.4);
     this.builds.push({
       exit,
-      steps: sectionSteps(seed, start, exit.tangent, exit.theme, true, [this.current.pool]),
+      steps: flumeSteps(seed, start, exit.tangent, exit.theme, this.hub),
       section: null,
       warms: null,
       warming: false,
@@ -1128,7 +1149,7 @@ export class Game {
     }
     exit.next = section;
     this.stage(section);
-    section.group.visible = true;
+    section.group.visible = false;
     if (!this.sections.includes(section)) this.sections.push(section);
   }
 
@@ -1194,8 +1215,8 @@ export class Game {
     }
     const next = exit.next;
     if (!next) return;
-    const prev = this.current;
-    prev.hideMouth(exit.index);
+    this.hub.hideMouth(exit.index);
+    this.inboundExit = exit.index;
     this.current = next;
     next.group.visible = true;
     this.mode = "slide";
@@ -1215,18 +1236,15 @@ export class Game {
     this.draft = 0;
     this.heave = 0;
     this.sheetSlope = 0;
-    this.poolSurface?.attach(next);
     this.sheetField?.attach(next);
-    this.lamps.attach(prev);
+    this.lamps.attach(this.hub);
     this.snapCam = true;
-    this.themeTarget = next.theme;
-    this.themeFade = this.themeFadeTime;
     this.trauma = Math.max(this.trauma, 0.28);
     this.fovPunch = 12;
     this.audio.whoosh();
     samplePath(next.path, this.dist, _frame);
     this.placeOnTube();
-    this.prune(prev);
+    this.prune(this.hub);
     useHud.getState().patch({
       mode: "slide",
       drop: this.drop,

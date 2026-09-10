@@ -37,6 +37,8 @@ export type PoolData = {
   radius: number;
   waterY: number;
   inflow: THREE.Vector3;
+  mouth: THREE.Vector3;
+  splash: THREE.Vector3;
 };
 
 export type RideSection = {
@@ -50,6 +52,7 @@ export type RideSection = {
   water: THREE.Mesh;
   sheet: { span: number; setField: (amount: number) => void };
   hideMouth: (index: number) => void;
+  showMouth: (index: number) => void;
   hideFlume: () => void;
   tick: (dt: number, elapsed: number, rider: { along: number; speed: number; g: number }) => void;
   dispose: () => void;
@@ -315,7 +318,7 @@ function addSplash(points: THREE.Vector3[], rng: Rng, tubeRadius: number): PoolD
 
   const inflow = center.clone().addScaledVector(inward, -(radius - 3.4));
   inflow.y = waterY;
-  return { center, radius, waterY, inflow };
+  return { center, radius, waterY, inflow, mouth, splash };
 }
 
 const FEATURES: Feature[] = ["drop", "sweep", "s", "helix", "loop", "hump"];
@@ -344,12 +347,12 @@ function runFeature(name: Feature, points: THREE.Vector3[], rng: Rng, tubeRadius
   }
 }
 
-function pickFeatures(rng: Rng, first: boolean): Feature[] {
-  if (first) return ["drop", "sweep", "drop", "loop", "s"];
+function pickFeatures(rng: Rng, inbound: boolean): Feature[] {
+  if (inbound) return ["drop", "sweep", "drop", "loop", "s"];
   const count = rng.int(3, 5);
-  const out: Feature[] = [];
-  let last: Feature | null = null;
-  for (let i = 0; i < count; i++) {
+  const out: Feature[] = ["drop"];
+  let last: Feature = "drop";
+  for (let i = 1; i < count; i++) {
     let f = rng.pick(FEATURES);
     if (f === last || (f === "loop" && last === "helix")) {
       f = rng.pick(FEATURES.filter((x) => x !== last && x !== "loop"));
@@ -358,8 +361,37 @@ function pickFeatures(rng: Rng, first: boolean): Feature[] {
     out.push(f);
     last = f;
   }
-  if (!out.includes("drop")) out.unshift("drop");
   return out.slice(0, 6);
+}
+
+function homeToHub(points: THREE.Vector3[], hub: PoolData) {
+  const pos = points[points.length - 1]!;
+  const mouth = hub.mouth;
+  const splash = hub.splash;
+  const out = mouth.clone().sub(hub.center);
+  out.y = 0;
+  if (out.lengthSq() < 1e-6) out.set(0, 0, 1);
+  out.normalize();
+  const gate = hub.center.clone().addScaledVector(out, -(hub.radius + 16));
+  gate.y = Math.max(pos.y - 10, mouth.y + 8);
+  const steps = 14;
+  for (let i = 1; i <= steps; i++) {
+    const u = i / steps;
+    const a = 1 - (1 - u) * (1 - u);
+    const p = pos.clone().lerp(gate, Math.min(1, a * 1.2));
+    p.lerp(mouth, Math.max(0, a * 1.15 - 0.2));
+    const away = p.clone().sub(hub.center);
+    away.y = 0;
+    const radial = away.length();
+    if (radial > 1e-4 && radial < hub.radius + 11 && u < 0.88) {
+      away.multiplyScalar((hub.radius + 12) / radial);
+      p.x = hub.center.x + away.x;
+      p.z = hub.center.z + away.z;
+    }
+    points.push(p);
+  }
+  points.push(mouth.clone());
+  points.push(splash.clone());
 }
 
 export function exitSeed(sectionSeed: number, index: number): number {
@@ -562,7 +594,10 @@ function* assembleMeshes(
   theme: Theme,
 ): Generator<
   void,
-  Pick<RideSection, "group" | "water" | "sheet" | "hideMouth" | "hideFlume" | "tick" | "dispose">,
+  Pick<
+    RideSection,
+    "group" | "water" | "sheet" | "hideMouth" | "showMouth" | "hideFlume" | "tick" | "dispose"
+  >,
   void
 > {
   const group = new THREE.Group();
@@ -670,6 +705,12 @@ function* assembleMeshes(
         for (const o of v.stub) o.visible = false;
       }
     },
+    showMouth: (index) => {
+      for (const v of exitVisuals) {
+        if (v.index !== index) continue;
+        for (const o of v.stub) o.visible = true;
+      }
+    },
     hideFlume: () => {
       tube.visible = false;
       sheet.visible = false;
@@ -724,20 +765,24 @@ function buildSheet(
 const MOUTH_CLEARANCE = 16;
 const GENERATION_ATTEMPTS = 6;
 
-function layoutIsClear(path: PathData, pool: PoolData, avoid: PoolData[]): boolean {
-  for (const other of avoid) {
-    const dx = pool.center.x - other.center.x;
-    const dz = pool.center.z - other.center.z;
-    if (Math.hypot(dx, dz) < pool.radius + other.radius + 5) return false;
+function layoutIsClear(path: PathData, pool: PoolData, avoid: PoolData[], returnToHub = false): boolean {
+  if (!returnToHub) {
+    for (const other of avoid) {
+      const dx = pool.center.x - other.center.x;
+      const dz = pool.center.z - other.center.z;
+      if (Math.hypot(dx, dz) < pool.radius + other.radius + 5) return false;
+    }
   }
   const samples = path.samples;
   const minSelf = path.radius * 2 + 0.6;
   const minSelfSq = minSelf * minSelf;
   const skip = Math.ceil(14 / path.spacing);
+  const endClear = returnToHub ? 24 : 0;
   for (let i = 0; i < samples.length; i += 2) {
     const sample = samples[i]!;
     const p = sample.position;
-    if (sample.distance > MOUTH_CLEARANCE) {
+    const nearEnd = returnToHub && sample.distance > path.length - endClear;
+    if (sample.distance > MOUTH_CLEARANCE && !nearEnd) {
       for (const other of avoid) {
         const dx = p.x - other.center.x;
         const dz = p.z - other.center.z;
@@ -800,6 +845,120 @@ export function* sectionSteps(
     exits,
     ...(yield* assembleMeshes(path, pool, exits, theme)),
   };
+}
+
+function* assembleFlume(
+  path: PathData,
+  hub: RideSection,
+  theme: Theme,
+): Generator<void, RideSection, void> {
+  const group = new THREE.Group();
+  const geometries: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
+  const pool = hub.pool;
+  const RADIAL = 16;
+  const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
+  const cutR = pool.radius - 0.08;
+  const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, RADIAL, false);
+  addRingAxes(tubeGeo, tubular, RADIAL, (u) => sampleApparentDown(path, u * path.length));
+  const tubeRings = cutFlume(tubeGeo, tubular, RADIAL, pool, cutR);
+  const stop = (tubeRings / tubular) * path.length;
+  const tubeMat = createTubeMaterial(theme, path.length, path.radius);
+  const tube = new THREE.Mesh(tubeGeo, tubeMat);
+  tube.frustumCulled = false;
+  group.add(tube);
+  geometries.push(tubeGeo);
+  materials.push(tubeMat);
+  yield;
+
+  const sheetTubular = tubular * SHEET_ALONG;
+  const sheetGeo = buildSheet(
+    path.curve,
+    sheetTubular,
+    SHEET_RADIAL,
+    path.radius,
+    (u) => sampleApparentG(path, u * path.length),
+    (u) => sampleApparentDown(path, u * path.length),
+  );
+  const sheetRings = cutFlume(sheetGeo, sheetTubular, SHEET_RADIAL, pool, cutR);
+  const sheetSpan = (sheetRings / sheetTubular) * path.length;
+  const sheetMat = createSheetMaterial(theme, path.length, path.radius, sheetSpan);
+  const sheet = new THREE.Mesh(sheetGeo, sheetMat);
+  sheet.frustumCulled = false;
+  sheet.renderOrder = 2;
+  group.add(sheet);
+  geometries.push(sheetGeo);
+  materials.push(sheetMat);
+  yield;
+  addRings(group, path, stop, theme, geometries, materials);
+
+  return {
+    id: nextId++,
+    seed: 0,
+    theme,
+    path,
+    pool,
+    exits: hub.exits,
+    group,
+    water: hub.water,
+    sheet: { span: sheetSpan, setField: (amount) => setSheetField(sheetMat, amount) },
+    hideMouth: () => undefined,
+    showMouth: () => undefined,
+    hideFlume: () => {
+      tube.visible = false;
+      sheet.visible = false;
+    },
+    tick: (dt, elapsed, rider) => {
+      scrollTube(tubeMat, dt, rider.speed);
+      scrollTube(sheetMat, dt, rider.speed);
+      ploughSheet(
+        sheetMat,
+        rider.along,
+        rider.along < 0 ? 0 : THREE.MathUtils.clamp(rider.speed / 26, 0, 1.3),
+        rider.g,
+      );
+      tickMaterials(dt);
+    },
+    dispose: () => {
+      group.removeFromParent();
+      for (const g of geometries) g.dispose();
+      for (const m of materials) m.dispose();
+    },
+  };
+}
+
+export function* flumeSteps(
+  seed: number,
+  start: THREE.Vector3,
+  startDir: THREE.Vector3,
+  theme: Theme,
+  hub: RideSection,
+): Generator<void, RideSection, void> {
+  const pool = hub.pool;
+  let rng = new Rng(seed);
+  let path!: PathData;
+  let cleaned!: THREE.Vector3[];
+  const radius = hub.path.radius;
+  for (let attempt = 0; attempt < GENERATION_ATTEMPTS; attempt++) {
+    rng = new Rng(attempt === 0 ? seed : forkSeed(seed, 7919 * attempt));
+    const points: THREE.Vector3[] = [];
+    addLeadIn(points, start, startDir);
+    for (const f of pickFeatures(rng, false)) runFeature(f, points, rng, radius);
+    homeToHub(points, pool);
+    cleaned = cleanPoints(points);
+    if (cleaned.length < 8) continue;
+    path = buildPath(cleaned, radius);
+    if (layoutIsClear(path, pool, [pool], true)) break;
+    yield;
+  }
+  if (!path) {
+    path = buildPath(
+      cleanPoints([start.clone(), pool.mouth.clone(), pool.splash.clone()]),
+      radius,
+    );
+  }
+  yield;
+  return yield* assembleFlume(path, hub, theme);
 }
 
 export function generateSection(
