@@ -33,12 +33,6 @@ type F = Node<"float">;
 type V2 = Node<"vec2">;
 type V3 = Node<"vec3">;
 
-/**
- * Tube water film: a thin sheet on the lower wall. Two-phase flow mapping
- * keeps the ripple normals moving without stretching, the wall texture is
- * refracted through the film, roughness drops where the wall is wet, and the
- * specular lobe is stretched along the flow with the physical anisotropy model.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
@@ -67,11 +61,9 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const uRefract = uniform(params.num("refract", 0.06));
   const cycle = 1.5;
 
-  // Wetness from the geometric normal: the floor of the tube faces down.
   const worldNormal = vertexStage(modelNormalMatrix.mul(normalLocal).normalize());
   const wet = smoothstep(-0.15, 0.85, worldNormal.y.negate());
 
-  // Flow-mapped ripple normals. u runs along the tube, v around it; tiles are 2 m.
   const along = uv().x.mul(L / 2);
   const around = uv().y.mul(circ / 2);
   const base = vec2(along, around);
@@ -89,7 +81,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const tnB = flowSample(base.mul(2.3), tiles.mul(1.3 * 2.3));
   const tn = tnA.add(tnB).normalize();
 
-  // Wall seen through the film: the streak map sampled with a normal-driven offset.
   const wallUV = vec2(uv().x.mul(L / 5), uv().y.mul(2)).add(tn.xy.mul(uRefract).mul(wet));
   const wallColor = texture(streakTex, wallUV).rgb.mul(color(theme.tube));
   const filmTint = mix(vec3(1), color(theme.water).mul(1.3), wet.mul(0.35));

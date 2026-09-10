@@ -25,12 +25,6 @@ import type { LabParams, LabScene } from "../harness";
 import { createNodeRenderer } from "../node-renderer";
 import { addLights, applyRideFov, disposeAll } from "./shared-node";
 
-/**
- * Spray and mist: tens of thousands of particles simulated in a compute kernel
- * (transform feedback on the WebGL backend), drawn as instanced sprites with
- * a soft depth fade against the pool, lit by the rider light; plus a handful
- * of large, faint billboards for mist around the splash.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
@@ -85,7 +79,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   buoy.position.y = 0.08;
   scene.add(buoy);
 
-  // Particle state
   const pos = instancedArray(N, "vec3");
   const vel = instancedArray(N, "vec3");
   const life = instancedArray(N, "float");
@@ -133,7 +126,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     life.element(i).assign(l);
   })().compute(N, [64]);
 
-  // Sprite material: lit by the rider light, soft against the depth buffer.
   const worldP = pos.toAttribute();
   const lifeAttr = life.toAttribute();
   const remain = lifeAttr.clamp(0, maxLife).div(maxLife);
@@ -160,7 +152,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   spray.frustumCulled = false;
   scene.add(spray);
 
-  // Mist: a few big, faint billboards drifting near the splash.
   let mist: THREE.Sprite | null = null;
   if (M > 0) {
     const mistPos = instancedArray(M, "vec3");

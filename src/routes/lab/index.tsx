@@ -30,13 +30,12 @@ const ROUTES = [
   },
 ] as const;
 
-/** Unlisted research index; nothing in the ride links here. */
 function LabIndex() {
   return (
     <main className="min-h-dvh bg-bg p-6 text-fg">
       <h1 className="text-lg font-medium">Undertow lab</h1>
       <p className="mt-1 max-w-xl text-sm text-muted">
-        Water prototypes for docs/research/water-and-renderer.md. Query knobs: ?backend=webgpu|webgl|glsl,
+        Water prototypes. Query knobs: ?backend=webgpu|webgl|glsl,
         ?res=2560x1080, ?palette=lagoon|abyss|kelp|slate, ?msaa=0.
       </p>
       <ul className="mt-5 space-y-2">

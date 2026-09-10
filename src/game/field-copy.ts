@@ -4,68 +4,26 @@ import type { texture } from "three/tsl";
 
 type FieldTexture = ReturnType<typeof texture>;
 
-/**
- * Seconds of read latency the height is carried forward over, and the metres it
- * may be carried. A read that never lands must not run the water away with it.
- */
 const AGE_MAX = 0.05;
 const LEAD_MAX = 0.2;
 
-/** What the water is doing at a point: metres, metres per second, and coverage. */
 export type FieldSample = THREE.Vector3;
 
 export type FieldCopy = {
-  /** Pack the field into the copy and start a read; a request already in flight wins. */
   read: () => void;
-  /**
-   * The copy at a normalised point in the field: height in metres about the
-   * line it is measured from, how fast that is rising, and how broken the water
-   * is. The height is carried forward at that rate over how old the copy is, so
-   * what comes back is the water now. Zero until the first read lands.
-   */
   at: (u: number, v: number, out: FieldSample) => FieldSample;
-  /** Forget the copy: the rig has moved to different water. */
   clear: () => void;
   dispose: () => void;
 };
 
-/**
- * The copy of a field the game reads.
- *
- * A field lives in a half-float target the GPU steps, and the ride has to know
- * what the water is doing to play on it: whether a wave has washed over the eye,
- * how far a splash lifts the rider, how white the water they are sitting in has
- * gone. A small pass packs the height across two bytes with the rate it is
- * changing at and its foam, and that byte target is read back asynchronously
- * with one request in flight. Sixteen bits across a field's own clamp is finer
- * than the water ever moves. The read lands a frame or two late, and a crown
- * washing over an eye is exactly the case where that shows, so the rate is what
- * closes the gap: the copy knows how old it is and hands back the height it has
- * risen to since.
- *
- * The rate is taken between the two halves of the ping-pong rather than from the
- * field's own velocity channel: a field holds as much as it integrates — a
- * datum, a chute's chop, the crater under a hull — and none of that is in the
- * velocity.
- *
- * Reading a target back does not go through a sampler, and the two backends
- * disagree about which end of the texture the first row is. Measured against a
- * splash at a known place: the WebGL 2 tier hands the field back upside down and
- * WebGPU does not. The pass writes it the way up the reader expects, so nothing
- * above here has to know.
- */
 export function fieldCopy(
   renderer: THREE.WebGPURenderer,
-  /** Texels of the copy. A row has to be a multiple of 256 bytes or the WebGPU copy pads it. */
   width: number,
   height: number,
-  /** The half the last step wrote and the one before it. */
   now: FieldTexture,
   before: FieldTexture,
-  /** Metres the height channel reaches either side of its line, and the seconds a step covers. */
   clamp: number,
   step: number,
-  /** Fastest rise the copy carries, m/s. */
   riseMax: number,
 ): FieldCopy {
   const uFlip = uniform(
@@ -102,7 +60,6 @@ export function fieldCopy(
 
   let data: Uint8Array | null = null;
   let busy = false;
-  /** When the field in hand was packed, and the seconds since, capped. */
   let packed = 0;
   const age = () => Math.min(AGE_MAX, (performance.now() - packed) / 1000);
 
@@ -125,9 +82,6 @@ export function fieldCopy(
       if (busy) return;
       busy = true;
       const stamp = performance.now();
-      // What the renderer was pointed at is put back: a section's shaders may be
-      // being built against the frame's own target and multiple render targets
-      // while this runs.
       const outer = renderer.getRenderTarget();
       const outerMrt = renderer.getMRT();
       renderer.setMRT(null);

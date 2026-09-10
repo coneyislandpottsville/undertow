@@ -44,11 +44,6 @@ const ZoomBlurShader = {
     }`,
 };
 
-/**
- * Classic baseline of the post stack: EffectComposer with RenderPass,
- * UnrealBloomPass (threshold-based, whole frame), a zoom-blur ShaderPass, and
- * OutputPass for tone mapping and colour space.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;

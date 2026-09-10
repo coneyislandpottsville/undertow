@@ -11,11 +11,6 @@ import {
   RideCamera,
 } from "./shared-gl";
 
-/**
- * Classic baseline of the tube film: MeshPhysicalMaterial with anisotropy and a
- * normal map, patched through onBeforeCompile for two-phase flow mapping, wall
- * refraction, and wetness-driven roughness. Same look, GLSL string surgery.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;

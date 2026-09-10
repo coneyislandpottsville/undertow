@@ -25,11 +25,6 @@ import { addLights, applyRideFov, disposeAll } from "./shared-node";
 type F = Node<"float">;
 type V2 = Node<"vec2">;
 
-/**
- * Whirlpool funnel: the pool disc displaced into a vortex in the vertex stage.
- * Energy drives throat depth and tightness; foam gathers at the lip and along
- * the spiral crests; the camera drops into the bowl as the spiral tightens.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
@@ -63,18 +58,15 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
 
-  // Knobs
   const fixedEnergy = params.num("energy", -1);
   const uTime = uniform(0);
   const uEnergy = uniform(0.6);
   const uDepth = uniform(params.num("depth", 6));
   const arms = 3;
 
-  // Throat width shrinks as energy rises; the lip (foam ring) sits just outside it.
   const sigma = float(0.16).add(float(0.1).mul(uEnergy.oneMinus()));
   const lipRho = sigma.mul(1.9);
 
-  /** Surface height at plane point p (metres, pool centred at the origin). */
   const height = (p: V2): F => {
     const r = length(p);
     const rho = r.div(R);
@@ -133,7 +125,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const drop = params.on("drop", true);
   let energy = 0.6;
 
-  /** CPU twin of the funnel term so the camera can ride the surface. */
   const funnelDepth = (r: number, e: number) => {
     const s = 0.16 + 0.1 * (1 - e);
     const q = r / R / s;

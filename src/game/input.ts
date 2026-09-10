@@ -77,7 +77,6 @@ export class Input {
     this.steerOverride = value;
   }
 
-  /** Player-visible: A / left = +1 (nose left). */
   getSteer(): number {
     if (this.steerOverride !== null) return this.steerOverride;
     let steer = 0;
@@ -93,7 +92,6 @@ export class Input {
     return Math.max(-1, Math.min(1, steer));
   }
 
-  /** W / up = +1 (paddle). S / down = −1 (brake / reverse). */
   getThrottle(): number {
     let t = 0;
     if (this.has("KeyW") || this.has("ArrowUp") || this.has("Space")) t += 1;

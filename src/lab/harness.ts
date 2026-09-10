@@ -1,16 +1,9 @@
 import { THEMES, type Theme } from "@/game/theme";
 
-/**
- * Shared contract for the lab prototypes under /lab. Renderer-agnostic on
- * purpose: node scenes import `three/webgpu`, classic scenes import `three`,
- * and this module imports neither so it can sit in the route chunk.
- */
 export type LabBackend = "webgpu" | "webgl" | "glsl";
 
 export type LabParams = {
-  /** webgpu = WebGPURenderer (auto-falls back), webgl = WebGPURenderer forced onto its WebGL 2 backend, glsl = classic WebGLRenderer. */
   backend: LabBackend;
-  /** Drawing-buffer override from `?res=WxH` (0 = follow the window). */
   width: number;
   height: number;
   theme: Theme;
@@ -55,13 +48,10 @@ export type LabInfo = {
   extra?: Record<string, unknown>;
 };
 
-/** What a prototype hands back: one call renders a frame, the rest is bookkeeping. */
 export type LabScene = {
-  /** The backend actually in use, after any WebGL fallback. */
   backend: string;
   frame: (dt: number, t: number) => void;
   resize: (w: number, h: number) => void;
-  /** GPU time of a recent frame in ms, or null when the platform has no timer query. */
   gpuMs: () => number | null;
   info: () => LabInfo;
   dispose: () => void;
@@ -80,10 +70,8 @@ export type LabStats = {
   fps: number;
   frameMs: number;
   recentFps: number;
-  /** The frame the ride is judged by, not the mean it averages to. */
   p99Ms: number;
   worstMs: number;
-  /** Frames past the 20 ms a dropped one costs. */
   spikes: number;
   gpuMs: number | null;
   drawCalls?: number;
@@ -91,10 +79,8 @@ export type LabStats = {
   extra?: Record<string, unknown>;
 };
 
-/** A frame slow enough to have dropped one, ms. */
 const SPIKE = 20;
 
-/** Every frame since the last reset, plus a short window for the overlay. */
 export class FrameMeter {
   private frames = 0;
   private seconds = 0;
@@ -150,7 +136,6 @@ export class FrameMeter {
   }
 }
 
-/** Exposed as `window.__lab` so scripts/lab-bench.mjs can drive the prototypes. */
 export type LabApi = {
   ready: boolean;
   error: string | null;
@@ -168,10 +153,6 @@ declare global {
 
 type TimerExt = { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number };
 
-/**
- * GPU frame timer for classic WebGL 2 via EXT_disjoint_timer_query_webgl2.
- * Returns null when the browser does not expose the extension.
- */
 export function createGlTimer(gl: WebGL2RenderingContext) {
   const ext = gl.getExtension("EXT_disjoint_timer_query_webgl2") as TimerExt | null;
   if (!ext) return null;

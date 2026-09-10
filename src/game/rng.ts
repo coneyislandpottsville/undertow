@@ -1,4 +1,3 @@
-/** Seeded PRNG — mulberry32 + xmur3. Never use Math.random() for generation. */
 
 export function xmur3(str: string): () => number {
   let h = 1779033703 ^ str.length;
@@ -32,7 +31,6 @@ export class Rng {
     this.next = mulberry32(seed >>> 0);
   }
 
-  /** [0, 1) */
   float(): number {
     return this.next();
   }

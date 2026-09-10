@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import type { Theme } from "@/game/theme";
 
-/** Classic-renderer twin of shared-node.ts; kept separate so neither build imports the other. */
 export function addLights(scene: THREE.Scene, camera: THREE.Camera, theme: Theme) {
   scene.add(new THREE.HemisphereLight(0x9ad0dc, 0x081418, 1.15));
   const dir = new THREE.DirectionalLight(0xe2f2f6, 0.55);
