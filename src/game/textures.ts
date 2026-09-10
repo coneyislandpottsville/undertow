@@ -126,8 +126,8 @@ export function wallCanvases(seed = 7): WallMaps {
       const drawn = tiledFbm(u, v, 9, 80, seed + 5, 2);
       const drift = tiledFbm(u, v, 6, 4, seed + 9, 2);
       const speck = Math.max(0, tiled(u, v, 128, 64, seed + 13) - 0.86) * 6;
-      height[i] += z + peel * 0.6 + drawn * 0.34 - speck * 0.5;
-      tone[i] += t + drift * 0.5 + drawn * 0.8 + peel * 0.35 - speck * 0.8;
+      height[i] += z + peel * 0.6 + drawn * 0.34 - speck * 0.2;
+      tone[i] += t + drift * 0.5 + drawn * 0.8 + peel * 0.35;
     }
   }
 

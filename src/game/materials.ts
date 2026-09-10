@@ -80,12 +80,14 @@ const RIPPLE_TILE = 2;
 const WALL_TILE = 5;
 const WALL_WRAP = 2;
 const WALL_RELIEF = 0.55;
-const BASIN_NEAR: Tile = [2.3, 43];
-const BASIN_MID: Tile = [5.9, 17];
-const BASIN_WIDE: Tile = [20, 5];
-const CAUSTIC_NEAR: Tile = [2.1, 47];
-const CAUSTIC_WIDE: Tile = [3.4, 29];
+const BASIN_NEAR: Tile = [3.2, 31];
+const BASIN_MID: Tile = [9.5, 11];
+const BASIN_WIDE: Tile = [34, 3];
+const CAUSTIC_NEAR: Tile = [3.6, 27];
+const CAUSTIC_WIDE: Tile = [7.4, 13];
 const REFLECT_BEND = 5;
+const BASIN_DETAIL_NEAR = 5;
+const BASIN_DETAIL_FAR = 22;
 
 const flows = new WeakMap<THREE.Material, { value: number }>();
 const uClock = uniform(0);
@@ -244,14 +246,19 @@ export function createTubeMaterial(
   const screen = theme.screen;
 
   const mat = new THREE.MeshPhysicalNodeMaterial({
-    side: THREE.BackSide,
+    side: mouth ? THREE.DoubleSide : THREE.BackSide,
     metalness: film.metalness,
     emissive: new THREE.Color(theme.tube),
     emissiveIntensity: film.glow,
   });
   mat.colorNode = wallColor.mul(filmTint).add(panel);
   const glow = materialEmissive.add(panel.mul(screen.glow));
-  mat.emissiveNode = mouth ? glow.mul(glowFalloff()) : glow;
+  const throat = color(theme.accent)
+    .mul(smoothstep(MOUTH_THROAT_NEAR, 1, uv().x))
+    .mul(MOUTH_THROAT_GLOW);
+  mat.emissiveNode = mouth
+    ? glow.mul(glowFalloff(MOUTH_GLOW_FAR, MOUTH_GLOW_FLOOR)).mul(MOUTH_GLOW_BOOST).add(throat)
+    : glow;
   const relief = vec3(
     tn.xy.mul(mix(float(film.normalDry), float(film.normalWet), wet)).add(mould.xy.mul(WALL_RELIEF)),
     1,
@@ -367,7 +374,11 @@ export function createSheetMaterial(
     ),
   ).g;
   const froth = sheetField.sample(fieldAt).z.mul(uPlough.w);
-  const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.2), froth)
+  const wash = smoothstep(0.02, 0.42, froth);
+  const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.7), froth)
+    .mul(0.55)
+    .add(wash.mul(0.45))
+    .mul(wash)
     .add(crest)
     .min(1)
     .mul(sheet.foam)
@@ -444,12 +455,18 @@ export function createWaterMaterial(theme: Theme): THREE.MeshStandardNodeMateria
 const GLOW_NEAR = 1.6;
 const GLOW_FAR = 14;
 const GLOW_FLOOR = 0.12;
+const MOUTH_GLOW_FAR = 7;
+const MOUTH_GLOW_BOOST = 2.5;
+const MOUTH_GLOW_FLOOR = 0.55;
+const MOUTH_THROAT_NEAR = 0.18;
+const MOUTH_THROAT_GLOW = 0.5;
+const EXIT_RING_GLOW = 0.45;
 
-function glowFalloff(): Node<"float"> {
+function glowFalloff(far = GLOW_FAR, floor = GLOW_FLOOR): Node<"float"> {
   const d = length(cameraPosition.sub(positionWorld));
-  return smoothstep(GLOW_NEAR, GLOW_FAR, d)
-    .mul(1 - GLOW_FLOOR)
-    .add(GLOW_FLOOR);
+  return smoothstep(GLOW_NEAR, far, d)
+    .mul(1 - floor)
+    .add(floor);
 }
 
 function bumpNormal(height: Node<"float">, scale: number): Node<"vec3"> {
@@ -500,7 +517,13 @@ export function createBasinMaterial(
     .add(erosion.mul(pool.erosion))
     .add(grain.mul(pool.grain))
     .div(weights);
-  const tone = smoothstep(0.28, 0.74, relief.add(grain.mul(pool.grain / weights)));
+  const close = smoothstep(BASIN_DETAIL_FAR, BASIN_DETAIL_NEAR, length(cameraPosition.sub(p)));
+  const shape = strata
+    .mul(pool.strata)
+    .add(erosion.mul(pool.erosion))
+    .add(grain.mul(pool.grain).mul(close))
+    .div(weights);
+  const tone = smoothstep(0.27, 0.75, relief.add(grain.mul(pool.grain / weights)));
 
   const rock = mix(color(theme.wall), color(theme.stripe), tone).mul(mix(1.1, 3.4, tone));
   const soaked = rock.mul(0.55).add(color(theme.water).mul(pool.wetTint * 0.3));
@@ -529,7 +552,7 @@ export function createBasinMaterial(
     side: surface === "wall" ? THREE.BackSide : THREE.DoubleSide,
   });
   mat.colorNode = mix(rock, soaked, wet).mul(fade).mul(shade).add(color(theme.ring).mul(line));
-  mat.normalNode = bumpNormal(relief, flat ? 0.9 : 2.2);
+  mat.normalNode = bumpNormal(shape, flat ? 0.9 : 2.2);
   mat.roughnessNode = mix(
     float(flat ? pool.floorRough : pool.wallRough),
     float(flat ? pool.floorRough * 0.4 : pool.wallRough * 0.25),
@@ -562,10 +585,84 @@ export function createExitRingMaterial(theme: Theme): THREE.MeshStandardNodeMate
     emissive: new THREE.Color(theme.accent),
     emissiveIntensity: theme.exit.glow,
   });
-  mat.emissiveNode = materialEmissive.mul(glowFalloff());
+  mat.emissiveNode = materialEmissive.mul(glowFalloff()).mul(EXIT_RING_GLOW);
   return mat;
 }
 
 export function tickMaterials(dt: number) {
   uClock.value += dt;
+}
+
+const STAR_LAYERS: [cells: number, size: number, gain: number][] = [
+  [30, 0.1, 1],
+  [68, 0.075, 0.72],
+  [136, 0.06, 0.5],
+];
+const STAR_CUT = 0.72;
+const STAR_EDGE = 0.03;
+const STAR_GAIN = 2.6;
+const STAR_HAZE = 0.22;
+const STAR_BLOOM = 2.4;
+
+const _sky = new THREE.Color();
+const _skyRgb = new THREE.Vector3();
+
+function linear(hex: number): THREE.Vector3 {
+  _sky.set(hex);
+  return new THREE.Vector3(_sky.r, _sky.g, _sky.b);
+}
+
+export type Sky = {
+  material: THREE.MeshBasicNodeMaterial;
+  setHorizon: (hex: number, t: number) => void;
+};
+
+export function createSky(): Sky {
+  const horizon = uniform(linear(0x05090c));
+  const zenith = linear(0x04070e);
+  const dir = normalize(positionLocal);
+  const hash = (cell: V3, salt: number) => {
+    const a = fract(cell.add(salt).mul(0.1031));
+    const b = a.add(dot(a, vec3(a.z, a.y, a.x).add(31.32)));
+    return fract(b.x.add(b.y).mul(b.z));
+  };
+
+  let field: Node<"float"> = float(0);
+  let warmth: Node<"float"> = float(0);
+  for (const [cells, size, gain] of STAR_LAYERS) {
+    const p = dir.mul(cells);
+    const cell = p.floor();
+    const jx = hash(cell, 0);
+    const jy = hash(cell, 17.13);
+    const jz = hash(cell, 41.77);
+    const seed = hash(cell, 91.31);
+    const centre = vec3(jx, jy, jz).sub(0.5).mul(0.74);
+    const d = length(p.fract().sub(0.5).sub(centre));
+    const disc = smoothstep(0, size, d).oneMinus();
+    const present = smoothstep(STAR_CUT, STAR_CUT + STAR_EDGE, seed);
+    const magnitude = pow(hash(cell, 55.91), 2.4).mul(0.92).add(0.08);
+    const star = disc.mul(disc).mul(present).mul(magnitude).mul(gain * STAR_GAIN);
+    field = field.add(star);
+    warmth = warmth.add(star.mul(jy));
+  }
+  const above = smoothstep(-0.04, 0.3, dir.y);
+  const stars = field.mul(mix(float(STAR_HAZE), float(1), above));
+  const tint = mix(vec3(0.72, 0.83, 1), vec3(1, 0.86, 0.7), warmth.div(field.max(1e-4)).clamp(0, 1));
+  const glow: V3 = tint.mul(stars);
+  const sky: V3 = mix(horizon, vec3(zenith.x, zenith.y, zenith.z), above).add(glow);
+
+  const material = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+  material.colorNode = sky;
+  material.mrtNode = mrt({
+    ...colorTargets(vec4(sky, 1)),
+    emissive: emissiveTarget(vec4(glow.mul(STAR_BLOOM), 1)),
+  });
+  return {
+    material,
+    setHorizon: (hex, t) => {
+      _sky.set(hex);
+      _skyRgb.set(_sky.r, _sky.g, _sky.b);
+      horizon.value.lerp(_skyRgb, t);
+    },
+  };
 }

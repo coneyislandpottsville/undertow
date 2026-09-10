@@ -7,7 +7,7 @@ import { atSide, drawnSides, watchPassDepth } from "./warm";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
-import { flumeFlow, setScreenSource } from "./materials";
+import { createSky, flumeFlow, setScreenSource, type Sky } from "./materials";
 import { createRidePost, type RidePost } from "./post";
 import {
   UNREFLECTED,
@@ -43,14 +43,16 @@ const BRAKE_DRAG = 3.4;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;
+const RIM_KEEP = 0.55;
+const RIM_STOP = 0.5;
 const WHIRL_TIME = 7;
 const WHIRL_INNER = 3.2;
 const WHIRL_LEAN = 3.2;
 const THEME_FADE = 1.2;
 const PLUNGE_K = 14;
 const PLUNGE_C = 2.6;
-const PLUNGE_MIN = 7;
-const PLUNGE_MAX = 12;
+const PLUNGE_MIN = 12;
+const PLUNGE_MAX = 18;
 const BOB_LAMBDA = 9;
 const CROSS_BAND = 0.12;
 const UNDER_FOV = 6;
@@ -68,6 +70,8 @@ const SPLASH_DROPS = 14;
 const SPLASH_SALT = 0x5314;
 const WAKE_BUBBLES = 1400;
 const BUILD_BUDGET = 3;
+const BOW_WIDTH = 2.2;
+const BOW_THROW = 1.6;
 
 function makeFrame() {
   return {
@@ -83,6 +87,7 @@ const _frame = makeFrame();
 const _sheet = new THREE.Vector3();
 const _ahead = makeFrame();
 const _up = new THREE.Vector3(0, 1, 0);
+const _down = new THREE.Vector3(0, -1, 0);
 const _look = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
@@ -152,6 +157,7 @@ export class Game {
   private readonly sun: THREE.DirectionalLight;
   private readonly ambient: THREE.AmbientLight;
   private readonly cavern: THREE.Mesh;
+  private readonly sky: Sky;
   private readonly floatie: THREE.Mesh;
   private poolSurface: PoolSurface | null = null;
   private sheetField: SheetField | null = null;
@@ -312,11 +318,10 @@ export class Game {
     this.camera.add(this.riderLight);
     this.riderLight.position.set(0, 0.35, -1.1);
 
-    const cavernGeo = new THREE.SphereGeometry(170, 24, 16);
-    const cavernMat = new THREE.MeshBasicNodeMaterial({ color: 0x05090c, side: THREE.BackSide });
-    this.cavern = new THREE.Mesh(cavernGeo, cavernMat);
+    const cavernGeo = new THREE.SphereGeometry(170, 48, 32);
+    this.sky = createSky();
+    this.cavern = new THREE.Mesh(cavernGeo, this.sky.material);
     this.cavern.frustumCulled = false;
-    this.cavern.layers.set(UNREFLECTED);
     this.scene.add(this.cavern);
 
     const floatGeo = new THREE.TorusGeometry(0.4, 0.09, 8, 22);
@@ -505,6 +510,7 @@ export class Game {
 
   private applyTheme(theme: Theme, t: number) {
     _themeColor.set(theme.fog);
+    this.sky.setHorizon(theme.fog, t);
     this.airFog.color.lerp(_themeColor, t);
     this.airFog.density += (theme.fogDensity - this.airFog.density) * t;
     _themeColor.set(theme.water).multiplyScalar(theme.pool.underShade);
@@ -959,8 +965,23 @@ export class Game {
       const s = maxR / r;
       this.px = pool.center.x + dx * s;
       this.pz = pool.center.z + dz * s;
-      const radial = (_fwd.x * dx + _fwd.z * dz) / r;
-      if (radial > 0) this.speed *= 0.45;
+      const nx = dx / r;
+      const nz = dz / r;
+      const radial = _fwd.x * nx + _fwd.z * nz;
+      if (radial > 0) {
+        let sx = _fwd.x - nx * radial;
+        let sz = _fwd.z - nz * radial;
+        const along = Math.hypot(sx, sz);
+        if (along > 1e-3) {
+          sx /= along;
+          sz /= along;
+          this.yaw = Math.atan2(-sx, -sz);
+          this.heading = this.yaw;
+          this.speed *= Math.max(RIM_KEEP, 1 - radial);
+        } else {
+          this.speed *= RIM_STOP;
+        }
+      }
     }
 
     this.updatePlunge(dt);
@@ -1082,6 +1103,7 @@ export class Game {
       return;
     }
     exit.next = section;
+    section.group.visible = false;
     this.scene.add(section.group);
     this.sections.push(section);
   }
@@ -1113,7 +1135,9 @@ export class Game {
     const next = exit.next;
     if (!next) return;
     const prev = this.current;
+    prev.hideMouth(exit.index);
     this.current = next;
+    next.group.visible = true;
     this.mode = "slide";
     this.dist = 2.2;
     this.speed = Math.max(11, Math.abs(this.speed) + 6);
@@ -1302,18 +1326,15 @@ export class Game {
     }
     if (this.splashPlan.length) {
       this.splashClock += dt;
-      const waterY = this.current.pool.waterY;
+      const energy = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
       while (this.splashPlan.length && this.splashPlan[0]!.at <= this.splashClock) {
         const e = this.splashPlan.shift()!;
         surface.impulse(e.x, e.z, e.radius, e.amplitude, e.shape);
         if (e.sound) this.audio.splashPart(e.sound, e.pitch);
-        if (e.spray === "crown") {
-          _tmp.set(e.x, waterY + 0.2, e.z);
-          this.spray?.splash(_tmp, 1, e.radius);
-        } else if (e.spray === "column") {
-          _tmp.set(e.x, waterY + 0.1, e.z);
-          this.spray?.column(_tmp, 0.4, e.radius);
-        }
+        if (!e.spray) continue;
+        _tmp.set(e.x, surface.waterLineAt(e.x, e.z, energy), e.z);
+        if (e.spray === "crown") this.spray?.splash(_tmp, 1, e.radius);
+        else this.spray?.column(_tmp, 0.4, e.radius);
       }
     }
     surface.update(
@@ -1418,6 +1439,19 @@ export class Game {
     this.camera.position.y += bob;
   }
 
+  private setBowWave(spray: Spray) {
+    const surface = this.poolSurface;
+    if (!surface || this.submerged > 0.5) {
+      spray.stopTube();
+      return;
+    }
+    if (this.mode === "whirl") _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
+    else _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
+    _tmp.set(this.px, surface.waterLineAt(this.px, this.pz, e), this.pz);
+    _flumeBank.crossVectors(_fwd, _up).normalize();
+    spray.setTubeEmitter(_tmp, _fwd, _down, _flumeBank, this.speed * BOW_THROW, BOW_WIDTH);
+  }
   private updateSpray(dt: number) {
     const spray = this.spray;
     if (!spray) return;
@@ -1438,6 +1472,8 @@ export class Game {
         this.speed,
         Math.sqrt(2 * radius * depth),
       );
+    } else if (this.mode === "whirl" || this.mode === "paddle") {
+      this.setBowWave(spray);
     } else {
       spray.stopTube();
     }

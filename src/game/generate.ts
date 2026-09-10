@@ -49,12 +49,14 @@ export type RideSection = {
   group: THREE.Group;
   water: THREE.Mesh;
   sheet: { span: number; setField: (amount: number) => void };
+  hideMouth: (index: number) => void;
   tick: (dt: number, elapsed: number, rider: { along: number; speed: number; g: number }) => void;
   dispose: () => void;
 };
 
 type ExitVisual = {
   ring: THREE.Mesh;
+  stub: THREE.Object3D[];
   theme: Theme;
   index: number;
 };
@@ -67,6 +69,10 @@ export const BASIN_DEPTH = 5.5;
 const POOL_RIM = 7;
 const TUBE_INTO_POOL = 1.6;
 const MOUTH_INTO_POOL = 1;
+const MOUTH_ALONG = 16;
+const MOUTH_RADIAL = 28;
+const RING_AROUND = 72;
+const TUBE_RING_AROUND = 64;
 
 function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
   points.push(points[points.length - 1]!.clone().addScaledVector(dir, dist));
@@ -436,7 +442,7 @@ function addRings(
   const spacing = 5.2;
   const count = Math.max(0, Math.floor((Math.min(path.length, stop) - 5) / spacing));
   if (count < 1) return;
-  const geo = new THREE.TorusGeometry(path.radius - 0.05, 0.055, 5, 20);
+  const geo = new THREE.TorusGeometry(path.radius - 0.05, 0.055, 8, TUBE_RING_AROUND);
   const mat = createRingMaterial(theme);
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   mesh.frustumCulled = false;
@@ -474,8 +480,8 @@ function addMouth(
     exit.position.clone().addScaledVector(outward, 6.5).add(new THREE.Vector3(0, -1.4, 0)),
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
-  const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  addRingAxes(geo, 12, 10, () => DOWN);
+  const geo = new THREE.TubeGeometry(curve, MOUTH_ALONG, radius, MOUTH_RADIAL, false);
+  addRingAxes(geo, MOUTH_ALONG, MOUTH_RADIAL, () => DOWN);
   const mat = createMouthMaterial(theme, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -483,7 +489,7 @@ function addMouth(
   geometries.push(geo);
   materials.push(mat);
 
-  const sheetGeo = buildSheet(curve, 12, 10, radius, () => 1, () => DOWN);
+  const sheetGeo = buildSheet(curve, MOUTH_ALONG, MOUTH_RADIAL, radius, () => 1, () => DOWN);
   const sheetMat = createSheetMaterial(theme, 9, radius);
   const sheetMesh = new THREE.Mesh(sheetGeo, sheetMat);
   sheetMesh.frustumCulled = false;
@@ -492,7 +498,7 @@ function addMouth(
   geometries.push(sheetGeo);
   materials.push(sheetMat);
 
-  const ringGeo = new THREE.TorusGeometry(radius + 0.3, 0.13, 8, 40);
+  const ringGeo = new THREE.TorusGeometry(radius + 0.3, 0.13, 10, RING_AROUND);
   const ringMat = createExitRingMaterial(theme);
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.position.copy(exit.position).addScaledVector(outward, -0.3);
@@ -502,7 +508,7 @@ function addMouth(
   geometries.push(ringGeo);
   materials.push(ringMat);
 
-  return { ring, theme, index: exit.index };
+  return { ring, stub: [mesh, sheetMesh, ring], theme, index: exit.index };
 }
 
 function* assembleMeshes(
@@ -510,7 +516,7 @@ function* assembleMeshes(
   pool: PoolData,
   exits: Exit[],
   theme: Theme,
-): Generator<void, Pick<RideSection, "group" | "water" | "sheet" | "tick" | "dispose">, void> {
+): Generator<void, Pick<RideSection, "group" | "water" | "sheet" | "hideMouth" | "tick" | "dispose">, void> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -608,6 +614,12 @@ function* assembleMeshes(
     group,
     water,
     sheet: { span: sheetSpan, setField: (amount) => setSheetField(sheetMat, amount) },
+    hideMouth: (index) => {
+      for (const v of exitVisuals) {
+        if (v.index !== index) continue;
+        for (const o of v.stub) o.visible = false;
+      }
+    },
     tick: (dt, elapsed, rider) => {
       scrollTube(tubeMat, dt, rider.speed);
       scrollTube(sheetMat, dt, rider.speed);
