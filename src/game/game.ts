@@ -787,7 +787,9 @@ export class Game {
     const dz = this.pz - pool.center.z;
     this.whirlAngle = Math.atan2(dx, dz);
     const outerR = pool.radius - this.current.path.radius - 1.3;
-    this.whirlR = THREE.MathUtils.clamp(Math.min(Math.hypot(dx, dz), pool.radius * 0.42), 5, outerR);
+    this.whirlR = THREE.MathUtils.clamp(pool.radius * 0.42, 5, outerR);
+    this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
+    this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
     this.whirlEnergy = 1;
     this.bank = 0;
     this.bankVel = 0;
@@ -1074,7 +1076,7 @@ export class Game {
     start.addScaledVector(outward, -0.4);
     this.builds.push({
       exit,
-      steps: sectionSteps(seed, start, exit.tangent, exit.theme, false, [this.current.pool]),
+      steps: sectionSteps(seed, start, exit.tangent, exit.theme, true, [this.current.pool]),
       section: null,
       warms: null,
       warming: false,
@@ -1432,21 +1434,13 @@ export class Game {
       _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       if (this.mode === "whirl") {
         const pool = this.current.pool;
-        const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
-        _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
-        _look.set(
+        _fwd.set(
           pool.center.x - this.px,
-          pool.waterY +
-            (this.poolSurface?.heightAt(this.whirlR * 0.3, e) ?? 0) +
-            0.5 -
-            this.eye.y,
+          pool.waterY - this.eye.y - 0.4,
           pool.center.z - this.pz,
         );
-        if (_look.lengthSq() > 0.001) {
-          _look.normalize();
-          _fwd.lerp(_look, 0.08 + 0.1 * e).normalize();
-        }
-        _fwd.y -= 0.22;
+        if (_fwd.lengthSq() < 1e-6) _fwd.set(0, -0.2, -1);
+        _fwd.normalize();
       }
       _fwd.y = this.mode === "paddle" ? -0.26 : _fwd.y;
       if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
