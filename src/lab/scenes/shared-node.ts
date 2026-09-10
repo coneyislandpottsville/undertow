@@ -1,7 +1,6 @@
 import * as THREE from "three/webgpu";
 import type { Theme } from "@/game/theme";
 
-/** Lighting rig matching game.ts so the prototypes read like the ride. */
 export function addLights(scene: THREE.Scene, camera: THREE.Camera, theme: Theme) {
   scene.add(new THREE.HemisphereLight(0x9ad0dc, 0x081418, 1.15));
   const dir = new THREE.DirectionalLight(0xe2f2f6, 0.55);
@@ -17,7 +16,6 @@ export function addLights(scene: THREE.Scene, camera: THREE.Camera, theme: Theme
   return { rider, accent, dir };
 }
 
-/** Same horizontal-FOV rule as the ride: wider aspect, wider view. */
 export function applyRideFov(camera: THREE.PerspectiveCamera, w: number, h: number) {
   const aspect = w / h;
   const hFov = aspect >= 2.1 ? 110 : aspect >= 1.8 ? 102 : aspect >= 1.5 ? 94 : 88;
@@ -36,7 +34,6 @@ export function canvasTexture(canvas: HTMLCanvasElement, srgb = false): THREE.Ca
   return tex;
 }
 
-/** Closed loop about 250 m long with gentle rises, enough for a ride at 40 m/s to never end. */
 export function loopCurve(): THREE.CatmullRomCurve3 {
   const pts: THREE.Vector3[] = [];
   const n = 12;
@@ -53,7 +50,6 @@ export function loopCurve(): THREE.CatmullRomCurve3 {
   return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
 }
 
-/** First-person camera riding the loop near the floor of the tube. */
 export class RideCamera {
   private dist = 0;
   private readonly length: number;

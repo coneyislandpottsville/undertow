@@ -3,11 +3,6 @@ import type { LabParams, LabScene } from "../harness";
 import { createGlRenderer } from "../gl-renderer";
 import { addLights, applyRideFov, disposeAll } from "./shared-gl";
 
-/**
- * Classic baseline of spray: the same particle rules stepped on the CPU into a
- * dynamic buffer, drawn as points with a GLSL soft-particle shader that reads a
- * depth pre-pass. This is the WebGL 2 fallback story for spray in numbers.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const gr = createGlRenderer(canvas, params);
   const { renderer } = gr;
@@ -62,7 +57,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   buoy.position.y = 0.08;
   scene.add(buoy);
 
-  // CPU particle state
   const pos = new Float32Array(N * 3);
   const vel = new Float32Array(N * 3);
   const life = new Float32Array(N);
@@ -242,7 +236,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
       depthRT.setSize(w, h);
       for (const m of [sprayMat, mistMat]) {
         m.uniforms.uResolution!.value.set(w, h);
-        // Point size in pixels for a 1 m particle at 1 m: half the viewport height over tan(fov/2).
         m.uniforms.uScale!.value = h / (2 * Math.tan((camera.fov * Math.PI) / 360));
       }
     },

@@ -1,131 +1,77 @@
 import type { ScreenArt } from "./textures";
 
-/**
- * A theme is what a section looks like: colours, plus the material, lighting
- * and fog parameters every surface reads. Defined here, read in exactly two
- * places — assembleMeshes in generate.ts for the meshes a section owns, and
- * Game.applyTheme for the scene-wide atmosphere and the shared rigs.
- *
- * Free of Three.js imports, so the ride, the node materials and the /lab
- * prototypes share one copy of the data.
- */
-
 export type Theme = {
   id: string;
-  /** Tube wall under the water film. */
   tube: number;
-  /** The lighter rock tone the basin bands between, with `wall` as the darker. */
   stripe: number;
-  /** The water itself: the film's wet tint, the pool body, the deep lamp. */
   water: number;
-  /** Pool wall and basin floor. */
   wall: number;
-  /** Exit rings and mouths, and the lamps over the pool. */
   accent: number;
-  /** Fog, background, and the aerated core of the vortex. */
   fog: number;
-  /** Tube rings, foam, current strips, spray. */
   ring: number;
 
   film: {
-    /** Wall roughness dry, and under the film. */
     dry: number;
     wet: number;
-    /** Ripple normal-map scale dry, and under the film. */
     normalDry: number;
     normalWet: number;
-    /** How far the wet wall's colour pulls toward `water`. */
     tint: number;
-    /** Stretch of the specular lobe along the flow. */
     streak: number;
     metalness: number;
-    /** The tube's own light, as a share of `tube`. Zero leaves it lit by lamps alone. */
     glow: number;
-    /** Ring emissive, in `ring`. */
     ringGlow: number;
   };
 
-  /** The sheet of water the flume runs, as a body with a surface of its own. */
   sheet: {
-    /** How deep it stands at rest and at every extra g, as a share of the tube radius. */
     depth: number;
     depthG: number;
-    /** Absorption per metre of water the eye looks through, and what it scatters back. */
     absorb: number;
     scatter: number;
-    /** How far the ripples bend the wall behind it, per metre of depth. */
     refract: number;
-    /** Metres of depth the leading edge foams over, and how brightly. */
     edge: number;
     foam: number;
-    /** The rider lamp's glitter path on the ripples. */
     glint: number;
-    /**
-     * How hard the surface throws the far side of the tube back at grazing
-     * angles. The sheet is unlit and the wall it mirrors is not, so a bright
-     * world needs less of it than a dark one or the water reads as a slab.
-     */
     mirror: number;
   };
 
   pool: {
     wallRough: number;
     wallMetal: number;
-    /** Wall emissive, in `wall`: what the surface reflects at grazing angles. */
     wallGlow: number;
     floorRough: number;
-    /** Basin emissive, in `water`. */
     floorGlow: number;
-    /** Rock: strata per metre of height, and the weight of each layer. */
     bands: number;
     strata: number;
     erosion: number;
     grain: number;
-    /** Caustics off the surface, on the rock above the line as well as under it. */
     caustic: number;
-    /** Light the pool bounces onto the rock around it, in `water`. */
     bounce: number;
-    /** The scum line at the water's edge, in `ring`. */
     line: number;
-    /** How far submerged rock pulls toward the water colour. */
     wetTint: number;
-    /** How far the wall fades from the water line to the rim. */
     rim: number;
-    /** Beer-Lambert absorption, per metre of water the eye looks through. */
     absorb: number;
-    /** Foam brightness on the funnel's lip and crests. */
     foam: number;
-    /** Tightness of the sun's glint on the surface. */
     gloss: number;
-    /** Fog density inside the body of water, and how far its colour darkens from `water`. */
     under: number;
     underShade: number;
   };
 
-  /** What the tube interior shows: the art it carries, and how. */
   screen: {
     art: ScreenArt;
-    /** Metres of tube between panels, and the share of that one fills. */
     pitch: number;
     fill: number;
-    /** Copies of the art around the tube. */
     wrap: number;
-    /** How brightly it reads on the wall, and how much of that blooms. */
     strength: number;
     glow: number;
-    /** Metres per second the panels drift along the tube. */
     drift: number;
     tint: number;
   };
 
   exit: {
-    /** Ring emissive at the trough of its pulse, and the swing above it. */
     glow: number;
     pulse: number;
-    /** Mouth lamp, likewise. */
     light: number;
     lightPulse: number;
-    /** Mouth interior emissive, in `accent`. */
     mouth: number;
   };
 
@@ -137,21 +83,17 @@ export type Theme = {
     sunIntensity: number;
     ambient: number;
     ambientIntensity: number;
-    /** The rider's own lamp: colour, intensity, and how far it reaches, m. */
     lamp: number;
     lampIntensity: number;
     lampRange: number;
-    /** Lamp above the pool, and the dimmer one under it. */
     pool: number;
     deep: number;
   };
 
-  /** FogExp2 density. */
   fogDensity: number;
   bloom: { strength: number; radius: number };
 };
 
-/** The lagoon's settings; every other theme lists only what it changes. */
 const FILM: Theme["film"] = {
   dry: 0.5,
   wet: 0.1,
@@ -234,7 +176,6 @@ const LIGHT: Theme["light"] = {
 
 export const THEMES: readonly Theme[] = [
   {
-    // Turquoise water over pale limestone, lit like a daylit cenote.
     id: "lagoon",
     tube: 0x1a6a78,
     stripe: 0x7f9a94,
@@ -253,8 +194,6 @@ export const THEMES: readonly Theme[] = [
     bloom: { strength: 0.6, radius: 0.4 },
   },
   {
-    // Basalt a long way down: almost no ambient light, dense fog, and what
-    // does glow glows hard.
     id: "abyss",
     tube: 0x14304a,
     stripe: 0x2b4c6e,
@@ -264,8 +203,6 @@ export const THEMES: readonly Theme[] = [
     fog: 0x03080f,
     ring: 0x9fd8ff,
     film: { ...FILM, dry: 0.55, wet: 0.08, tint: 0.45, ringGlow: 0.3 },
-    // Cold water a long way down: little to scatter, and a dark wall it can
-    // mirror hard without the sheet lifting off it.
     sheet: { ...SHEET, depth: 0.11, absorb: 1.7, scatter: 0.35, glint: 1.1, foam: 0.35, mirror: 1.15 },
     pool: {
       ...POOL,
@@ -315,8 +252,6 @@ export const THEMES: readonly Theme[] = [
     bloom: { strength: 0.85, radius: 0.5 },
   },
   {
-    // Weed-choked and murky: green light, water you cannot see far through,
-    // and a wall that has been wet for a very long time.
     id: "kelp",
     tube: 0x24704f,
     stripe: 0x6f6838,
@@ -326,8 +261,6 @@ export const THEMES: readonly Theme[] = [
     fog: 0x0a1a10,
     ring: 0xd8ecb0,
     film: { ...FILM, dry: 0.62, wet: 0.16, normalWet: 0.85, tint: 0.5 },
-    // A choked flume: deep, thick, sluggish. Water you cannot see through,
-    // foam the weed has stained, and no polish on it at all.
     sheet: {
       ...SHEET,
       depth: 0.13,
@@ -354,7 +287,6 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.42,
       foam: 0.6,
       gloss: 160,
-      // Murky, but not so murky that the throat and the rock are one green wash.
       under: 0.32,
       underShade: 0.26,
     },
@@ -389,8 +321,6 @@ export const THEMES: readonly Theme[] = [
     bloom: { strength: 0.5, radius: 0.35 },
   },
   {
-    // Cooling lava: the rock still has heat in it, and the water carries the
-    // fire rather than the sky.
     id: "ember",
     tube: 0x4a2418,
     stripe: 0x6f3a22,
@@ -400,7 +330,6 @@ export const THEMES: readonly Theme[] = [
     fog: 0x140704,
     ring: 0xffcf9a,
     film: { ...FILM, dry: 0.45, tint: 0.4, glow: 0.06 },
-    // Running thin over hot rock, and carrying the fire rather than the sky.
     sheet: { ...SHEET, depth: 0.09, absorb: 1.5, scatter: 0.7, refract: 1.7, foam: 0.4, glint: 1, mirror: 0.85 },
     pool: {
       ...POOL,
@@ -450,8 +379,6 @@ export const THEMES: readonly Theme[] = [
     bloom: { strength: 0.9, radius: 0.45 },
   },
   {
-    // The one bright world: meltwater under an ice shelf, clear enough to see
-    // the basin floor, with the fog itself lit.
     id: "glacier",
     tube: 0x7ba6c2,
     stripe: 0xdaeef5,
@@ -470,9 +397,6 @@ export const THEMES: readonly Theme[] = [
       streak: 0.6,
       metalness: 0.02,
     },
-    // Meltwater: the flume runs full, and it is clear enough to read the wall
-    // through. The wall is already the brightest thing here, so the surface
-    // gives most of it back rather than all.
     sheet: {
       ...SHEET,
       depth: 0.14,
@@ -502,8 +426,6 @@ export const THEMES: readonly Theme[] = [
       absorb: 0.1,
       foam: 0.9,
       gloss: 520,
-      // The one world you can see the far side of from under the water. At the
-      // density the others carry, meltwater came out milk.
       under: 0.04,
       underShade: 0.52,
     },
@@ -538,8 +460,6 @@ export const THEMES: readonly Theme[] = [
     bloom: { strength: 0.35, radius: 0.3 },
   },
   {
-    // Not a cave at all: a lit tube, a violet pool and magenta rings, with the
-    // wall banded like tile and the film polished.
     id: "neon",
     tube: 0x3a1a58,
     stripe: 0x50406e,
@@ -558,7 +478,6 @@ export const THEMES: readonly Theme[] = [
       glow: 0.1,
       ringGlow: 0.5,
     },
-    // A lit tube reflecting hard off polished water is the whole idea here.
     sheet: { ...SHEET, absorb: 1.4, scatter: 0.6, refract: 1.8, foam: 0.35, glint: 1.2, mirror: 1.2 },
     pool: {
       ...POOL,
@@ -617,15 +536,10 @@ export function themeAt(index: number): Theme {
 
 let pinned: Theme | null = null;
 
-/** `?theme=` holds the whole run to one theme, for judging them side by side. */
 export function pinTheme(id: string | null) {
   pinned = id ? (THEMES.find((t) => t.id === id) ?? null) : null;
 }
 
-/**
- * The theme a section grown from `seed` wears. `avoid` is the theme of the
- * pool it opens out of, so every exit is a change of world.
- */
 export function themeForSeed(seed: number, avoid?: string): Theme {
   if (pinned) return pinned;
   const choices = avoid ? THEMES.filter((t) => t.id !== avoid) : THEMES;

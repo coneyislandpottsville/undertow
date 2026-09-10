@@ -1,14 +1,9 @@
 import * as THREE from "three/webgpu";
 import type { LabParams } from "./harness";
 
-/**
- * WebGPURenderer bootstrap for the node prototypes. `?backend=webgl` forces the
- * WebGL 2 backend so the same TSL scene can be measured on both paths.
- */
 export type NodeRenderer = {
   renderer: THREE.WebGPURenderer;
   backend: "webgpu" | "webgl";
-  /** Resolve the timestamp queries of the frame just rendered; gpuMs() picks the result up later. */
   resolveTimestamps: (compute?: boolean) => void;
   gpuMs: () => number | null;
   info: () => { drawCalls: number; triangles: number };
@@ -36,7 +31,6 @@ export async function createNodeRenderer(
   renderer.toneMappingExposure = 1.05;
 
   let last: number | null = null;
-  // Resolve every frame: the query pools are per pass and overflow if resolves are skipped.
   const resolveTimestamps = (compute = false) => {
     const jobs: Promise<unknown>[] = [renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER)];
     if (compute) jobs.push(renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE));

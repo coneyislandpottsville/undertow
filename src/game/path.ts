@@ -6,18 +6,10 @@ export type PathSample = {
   tangent: THREE.Vector3;
   normal: THREE.Vector3;
   binormal: THREE.Vector3;
-  /** dT/ds: points at the centre of curvature, magnitude 1 / turn radius. */
   curvature: THREE.Vector3;
   quat: THREE.Quaternion;
   distance: number;
-  /**
-   * Unit vector along apparent gravity here — gravity plus the centrifugal
-   * push of speed² × curvature — at the section's nominal speed. This is the
-   * direction the water film runs down, so at the top of a loop it points at
-   * the outer wall, not at the ground.
-   */
   apparentDown: THREE.Vector3;
-  /** How hard it presses, in g. Weightless at a hump crest, three through a fast turn. */
   apparentG: number;
 };
 
@@ -37,7 +29,6 @@ function orthonormalUp(tangent: THREE.Vector3): THREE.Vector3 {
   return up.sub(tangent.clone().multiplyScalar(up.dot(tangent))).normalize();
 }
 
-/** Double-reflection rotation-minimizing frames (Wang et al.). */
 function computeRmf(points: THREE.Vector3[], tangents: THREE.Vector3[]): THREE.Vector3[] {
   const n = points.length;
   const normals: THREE.Vector3[] = new Array(n);
@@ -117,14 +108,6 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
   return { curve, samples, length, spacing: actualSpacing, radius };
 }
 
-/**
- * Fill in each sample's apparent-gravity direction.
- *
- * The rider's speed is not known when a section is built, but it is very nearly
- * determined by the section's own slope: the same integration updateSlide runs,
- * with no throttle and no brake. That is enough to know which wall the film
- * runs down, which is all this is for.
- */
 function applyApparentGravity(samples: PathSample[], spacing: number) {
   const raw: THREE.Vector3[] = [];
   const mags: number[] = [];
@@ -132,18 +115,12 @@ function applyApparentGravity(samples: PathSample[], spacing: number) {
   let v = ENTRY_SPEED;
   for (const sample of samples) {
     const along = -sample.tangent.y * GRAVITY + FLOW - QUAD_DRAG * v * v;
-    // dv = a dt and dt = ds / v, so a step of arc length costs a ds / v of speed.
     v = THREE.MathUtils.clamp(v + (along * spacing) / Math.max(v, 1), MIN_SPEED, MAX_SPEED);
-    // Apparent gravity in the rider's frame: gravity, plus the centrifugal push
-    // away from the centre of curvature. Weightless at the crest of a hump, so
-    // fall back to plain down rather than normalising something near zero.
     g.set(0, -GRAVITY, 0).addScaledVector(sample.curvature, -(v * v));
     const mag = g.length();
     mags.push(mag / GRAVITY);
     raw.push(mag > 1 ? g.clone().divideScalar(mag) : new THREE.Vector3(0, -1, 0));
   }
-  // The same short box filter the curvature gets, so the band slides around the
-  // tube through a loop instead of snapping across it.
   for (let i = 0; i < samples.length; i++) {
     const acc = new THREE.Vector3();
     let press = 0;
@@ -161,10 +138,6 @@ function applyApparentGravity(samples: PathSample[], spacing: number) {
   }
 }
 
-/**
- * Curvature vectors by central difference of the unit tangents, then a short
- * box filter so Catmull-Rom knots do not read as kinks to the rider physics.
- */
 function computeCurvature(tangents: THREE.Vector3[], spacing: number): THREE.Vector3[] {
   const n = tangents.length;
   const raw: THREE.Vector3[] = [];

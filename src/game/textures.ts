@@ -1,30 +1,15 @@
 import { Rng } from "@/game/rng";
 
-/**
- * Canvas generators shared by the ride's materials and the /lab prototypes.
- * They return plain canvases so each renderer wraps them with its own texture
- * class. Seeded, so every session draws the same walls.
- */
-
-/** Smoothstep between 0 and 1. */
 function fade(t: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** An integer lattice point's value, 0 to 1. */
 function hash(x: number, y: number, seed: number): number {
   let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 1442695041);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
-/**
- * Value noise on a lattice that wraps, sampled in tile space.
- *
- * Everything here has to tile, and a noise that wraps at a chosen period is what
- * lets the relief, the tone and the grain all be built from the same fields
- * without a seam anywhere.
- */
 function tiled(u: number, v: number, px: number, py: number, seed: number): number {
   const x = u * px;
   const y = v * py;
@@ -38,7 +23,6 @@ function tiled(u: number, v: number, px: number, py: number, seed: number): numb
   return lower + (upper - lower) * fy;
 }
 
-/** Octaves of that, halving in amplitude, about zero. */
 function tiledFbm(
   u: number,
   v: number,
@@ -58,57 +42,29 @@ function tiledFbm(
   return sum / norm;
 }
 
-/** How far `a` is from `b` the short way round a tile. */
 function wrapped(a: number, b: number): number {
   return a - b - Math.floor(a - b + 0.5);
 }
 
-/** Texels of the wall tile along the tube and around it, and the metres each covers. */
 const WALL_ALONG = 512;
 const WALL_AROUND = 256;
 const WALL_SPAN = 5;
 const WALL_GIRTH = 8.6;
-/** Flow lines pulled down the tile, the seams that ring it, and the texels a seam is wide. */
 const WALL_LINES = 34;
 const WALL_SEAMS = 2;
 const WALL_SEAM_WIDE = 3;
-/** Metres of relief one unit of the height field stands for. */
 const WALL_DEPTH = 0.03;
 
 export type WallMaps = {
-  /** Colour under the film, near-white so a theme's tube colour reads through it. */
   albedo: HTMLCanvasElement;
-  /** Tangent-space normal of the moulding. */
   normal: HTMLCanvasElement;
-  /** Roughness about a half in red, ambient occlusion in green. */
   surface: HTMLCanvasElement;
 };
 
-/**
- * The wall the water is seen through, as one set of maps.
- *
- * The whole body of the sheet in the flume is this wall refracted, absorbed and
- * mirrored back at grazing angles, so how far the water reads is capped by how
- * much is here. It is a moulded flume, and it is read at every range: flow lines
- * pulled down its length where the water has always run and a seam ring where
- * two shells meet, both of them read from across a pool; the moulding's own
- * orange peel and the fine streaking of what has run down it, which is what
- * there is to see with the wall a metre from the eye.
- *
- * Every channel comes off one pair of fields, so the tone in a groove, the
- * normal that turns light out of it, the gloss scuffed out of it and the light
- * it loses are one feature rather than four that nearly line up. `x` runs along
- * the tube and `y` around it, which is how the tube's own uv is sampled, and the
- * two axes carry different metres per texel, so the relief is differenced over
- * each of them separately or the moulding leans.
- */
 export function wallCanvases(seed = 7): WallMaps {
   const w = WALL_ALONG;
   const h = WALL_AROUND;
   const rng = new Rng(seed);
-  // Where each flow line sits around the tube, how wide and deep it cuts, how
-  // far it wanders along the tube, and how it is toned: the moulding has taken
-  // what runs down some of them and is polished pale in others.
   const lines = Array.from({ length: WALL_LINES }, () => ({
     at: rng.float(),
     width: rng.range(0.012, 0.05),
@@ -119,10 +75,6 @@ export function wallCanvases(seed = 7): WallMaps {
     pale: rng.chance(0.45),
   }));
 
-  // The line profile is the same for every line, so it is a table read at |q|
-  // rather than a pair of exponentials at every texel of every line: at a
-  // third of a million texels and thirty-odd lines that is the difference
-  // between a third of a second of the boot and a tenth.
   const PROFILE = 512;
   const PROFILE_REACH = 5;
   const bell = new Float32Array(PROFILE + 1);
@@ -141,8 +93,6 @@ export function wallCanvases(seed = 7): WallMaps {
 
   const height = new Float32Array(w * h);
   const tone = new Float32Array(w * h);
-  // A line reaches a few widths either side of itself and no further, so only
-  // the band it lies in is walked.
   for (const line of lines) {
     const reach = Math.ceil(line.width * PROFILE_REACH * h);
     for (let x = 0; x < w; x++) {
@@ -154,8 +104,6 @@ export function wallCanvases(seed = 7): WallMaps {
         const q = wrapped((y + 0.5) / h, at) / line.width;
         const core = profile(bell, q);
         const i = y * w + x;
-        // A groove with the moulding standing a little proud either side of it,
-        // which is what catches a light thrown across the wall.
         height[i] += (profile(lip, q) * 0.16 - core * 0.55) * line.depth;
         tone[i] += core * line.depth * (line.pale ? 0.5 : -0.42);
       }
@@ -174,12 +122,9 @@ export function wallCanvases(seed = 7): WallMaps {
         z += profile(lip, q) * 0.28 - core * 0.7;
         t -= core * 0.5;
       }
-      // The moulding's own skin; the fine streaking of what runs down it, drawn
-      // out along the tube; and a broad drift in the gelcoat under both.
       const peel = tiledFbm(u, v, 14, 24, seed + 3, 3);
       const drawn = tiledFbm(u, v, 9, 80, seed + 5, 2);
       const drift = tiledFbm(u, v, 6, 4, seed + 9, 2);
-      // Pinholes in the gelcoat: sparse, small, and dark.
       const speck = Math.max(0, tiled(u, v, 128, 64, seed + 13) - 0.86) * 6;
       height[i] += z + peel * 0.6 + drawn * 0.34 - speck * 0.5;
       tone[i] += t + drift * 0.5 + drawn * 0.8 + peel * 0.35 - speck * 0.8;
@@ -205,7 +150,6 @@ export function wallCanvases(seed = 7): WallMaps {
       const z = height[y * w + x]!;
       const t = tone[y * w + x]!;
       const cut = Math.max(0, -z);
-      // Metres of relief per metre of wall, each axis over its own texel size.
       const dx = ((at(x + 1, y) - at(x - 1, y)) * WALL_DEPTH * (w / WALL_SPAN)) / 2;
       const dy = ((at(x, y + 1) - at(x, y - 1)) * WALL_DEPTH * (h / WALL_GIRTH)) / 2;
       const len = Math.hypot(dx, dy, 1);
@@ -214,17 +158,12 @@ export function wallCanvases(seed = 7): WallMaps {
       normal.img.data[i + 2] = byte((1 / len) * 0.5 + 0.5);
       normal.img.data[i + 3] = 255;
 
-      // Near-white, so a theme's tube colour is what the wall reads as, and what
-      // has run down a groove is what darkens it.
       const base = 0.86 + t * 0.3 + z * 0.12;
       albedo.img.data[i] = byte(base * (1 - 0.16 * cut));
       albedo.img.data[i + 1] = byte(base * (1 - 0.11 * cut));
       albedo.img.data[i + 2] = byte(base * (1 - 0.06 * cut));
       albedo.img.data[i + 3] = 255;
 
-      // Gloss survives on the moulded face and is scuffed out of the grooves,
-      // and the light that reaches the bottom of one is what the wall around it
-      // stands above it.
       const around = (at(x - 4, y) + at(x + 4, y) + at(x, y - 3) + at(x, y + 3)) * 0.25;
       surface.img.data[i] = byte(Math.min(0.8, 0.48 + cut * 0.24 - t * 0.14));
       surface.img.data[i + 1] = byte(1 - Math.min(0.4, Math.max(0, (around - z) * 0.55)));
@@ -236,21 +175,6 @@ export function wallCanvases(seed = 7): WallMaps {
   return { albedo: albedo.ctx.canvas, normal: normal.ctx.canvas, surface: surface.ctx.canvas };
 }
 
-/**
- * The rock the pool is cut into, as one tileable field.
- *
- * The pool's water is read through its basin — refracted by it, absorbed
- * against its depth, lit by the caustics thrown onto it — so what the rock
- * carries is the ceiling on how the water reads, and it was five noise
- * evaluations a pixel across the most expensive phase of the ride. It is
- * fields now, read once and weighted per theme, so a world can still be all
- * strata or all erosion.
- *
- * Erosion in red and the grain over it in green, both about a half; the light
- * a hollow loses in blue; and how far the rock is polished in alpha. Read at
- * three sizes that never come round together, red is also the broad drift the
- * strata wander on.
- */
 export function basinCanvas(size = 512, seed = 41): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -268,10 +192,6 @@ export function basinCanvas(size = 512, seed = 41): HTMLCanvasElement {
       grain[i] = tiledFbm(u, v, 22, 22, seed + 5, 2);
     }
   }
-  // Relief is what both channels stand for together; the light a point loses is
-  // how far the rock around it stands above it, and the polish is the other
-  // side of that — a face that stands proud has been worn smooth, a hollow has
-  // not.
   const relief = (x: number, y: number) => {
     const i = ((y + size) % size) * size + ((x + size) % size);
     return erosion[i]! * 0.72 + grain[i]! * 0.28;
@@ -294,12 +214,6 @@ export function basinCanvas(size = 512, seed = 41): HTMLCanvasElement {
   return canvas;
 }
 
-/**
- * Caustics as a tileable field of filaments: the lines a wavy surface focuses
- * light into. Two reads of this at scales that drift against each other are the
- * whole web, which is what the rock was paying two octaves of three-dimensional
- * fractal noise a pixel for.
- */
 export function causticCanvas(size = 256, seed = 29): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -311,9 +225,6 @@ export function causticCanvas(size = 256, seed = 29): HTMLCanvasElement {
     for (let x = 0; x < size; x++) {
       const u = (x + 0.5) / size;
       const i = (y * size + x) * 4;
-      // Where the field crosses zero is where the light lands. The field is
-      // driven well past ±1 so only a narrow band either side of a crossing is
-      // lit at all: a caustic is a line, not a haze.
       const n = tiledFbm(u, v, 5, 5, seed, 3) * 6.5;
       const filament = Math.pow(Math.max(0, 1 - Math.abs(n)), 3);
       img.data[i] = Math.round(filament * 255);
@@ -326,11 +237,6 @@ export function causticCanvas(size = 256, seed = 29): HTMLCanvasElement {
   return canvas;
 }
 
-/**
- * A tileable grain, for the scatter of bubbles a patch of foam closes up as the
- * water aerates. Two octaves in red and five times finer in green, so one fetch
- * carries both scales the foam is written across.
- */
 export function grainCanvas(size = 256, seed = 23): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -352,7 +258,6 @@ export function grainCanvas(size = 256, seed = 23): HTMLCanvasElement {
   return canvas;
 }
 
-/** A tiling height field differenced with wrap-around into a tangent-space normal. */
 function normalCanvas(height: Float32Array, size: number, strength: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -377,7 +282,6 @@ function normalCanvas(height: Float32Array, size: number, strength: number): HTM
   return canvas;
 }
 
-/** A seeded sum of sines on a wrapping lattice, as a height field. */
 function waveHeight(
   size: number,
   seed: number,
@@ -403,10 +307,6 @@ function waveHeight(
   return height;
 }
 
-/**
- * Tiling tangent-space normal map of small ripples, drawn out along the tube:
- * what a film of water running down a wall makes.
- */
 export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLCanvasElement {
   const height = waveHeight(size, seed, 7, (rng) => ({
     kx: Math.round(rng.range(-6, 6)),
@@ -415,11 +315,6 @@ export function rippleNormalCanvas(size = 256, seed = 11, strength = 1.0): HTMLC
   return normalCanvas(height, size, strength);
 }
 
-/**
- * The same, with no direction to it: open water, which reads the same whichever
- * way the rider is facing. Two reads of this are the pool's near-field chop,
- * where three noise evaluations used to buy one slope.
- */
 export function chopNormalCanvas(size = 256, seed = 17, strength = 1.0): HTMLCanvasElement {
   const height = waveHeight(size, seed, 9, (rng) => {
     const angle = rng.float() * Math.PI * 2;
@@ -429,7 +324,6 @@ export function chopNormalCanvas(size = 256, seed = 17, strength = 1.0): HTMLCan
   return normalCanvas(height, size, strength);
 }
 
-/** Checker with soft seams so refraction and absorption have something to bend. */
 export function floorCanvas(size = 512): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -457,15 +351,8 @@ export function floorCanvas(size = 512): HTMLCanvasElement {
   return canvas;
 }
 
-/** The pattern a theme's tube panels carry. */
 export type ScreenArt = "shoal" | "motes" | "fronds" | "cracks" | "strata" | "grid";
 
-/**
- * Art for the tube interior, drawn white on transparent so the material tints
- * it. x wraps around the tube, so anything drawn across it reads as a ring and
- * anything drawn down y streams past the rider; every pattern is seeded and
- * tiles in x.
- */
 export function screenCanvas(art: ScreenArt, size = 512): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -475,7 +362,6 @@ export function screenCanvas(art: ScreenArt, size = 512): HTMLCanvasElement {
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = "#fff";
   ctx.strokeStyle = "#fff";
-  /** Draw once, then again a tile to each side, so the pattern wraps in x. */
   const wrapped = (draw: () => void) => {
     for (const dx of [-size, 0, size]) {
       ctx.save();

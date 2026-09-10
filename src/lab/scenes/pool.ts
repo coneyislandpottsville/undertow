@@ -43,12 +43,6 @@ type F = Node<"float">;
 type V2 = Node<"vec2">;
 type V3 = Node<"vec3">;
 
-/**
- * Pool surface: planar reflection (reflector node), refraction of the floor
- * through the shared viewport texture, depth-based absorption from the depth
- * texture, plus ripples from either an analytic normal field (`?sim=analytic`)
- * or a shallow-water height field stepped in compute (`?sim=compute`).
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
@@ -66,7 +60,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   scene.add(camera);
   const { rider } = addLights(scene, camera, theme);
 
-  // Basin: textured floor and a few submerged shapes give refraction and absorption something to bend.
   const wallMat = new THREE.MeshStandardNodeMaterial({
     color: theme.wall,
     roughness: 0.72,
@@ -102,7 +95,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   lip.rotation.x = Math.PI / 2;
   scene.add(lip);
 
-  // Knobs
   const uTime = uniform(0);
   const uWake = uniform(new THREE.Vector3(0, 0, 0.035));
   const uImpulse = uniform(new THREE.Vector4(0, 0, 0.7, 0));
@@ -112,7 +104,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const uC = uniform(params.num("c", 0.22));
   const uDamp = uniform(params.num("damp", 0.992));
 
-  /** Small analytic ripples: three directional waves, a slow noise swell and a ring wake from the moving source. */
   const rippleHeight = (p: V2, t: F): F => {
     const w1 = sin(p.x.mul(1.4).add(p.y.mul(0.6)).add(t.mul(1.8))).mul(0.03);
     const w2 = sin(p.x.mul(-0.8).add(p.y.mul(1.7)).sub(t.mul(1.3))).mul(0.024);
@@ -123,11 +114,9 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     return w1.add(w2).add(w3).add(swell).add(wake);
   };
 
-  // Local plane coordinates: mesh rotated -90° about X, so world x = local x and world z = -local y.
   const vertexXZ = vec2(positionLocal.x, positionLocal.y.negate());
   const fragXZ = vec2(positionWorld.x, positionWorld.z);
 
-  // Sim buffers (compute mode)
   const cell = (2 * R) / (N - 1);
   const hA = attributeArray(N * N, "float");
   const hB = attributeArray(N * N, "float");
@@ -135,7 +124,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const hDisplay = attributeArray(N * N, "float");
   const nrm = attributeArray(N * N, "vec3");
 
-  /** Grid neighbours with clamped edges, shared by both kernels. */
   const neighbours = (i: Node<"uint">) => {
     const n = uint(N);
     const x = i.mod(n);
@@ -154,8 +142,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     };
   };
 
-  // Two kernels with two outputs each: the WebGL backend runs compute through
-  // transform feedback, which caps the number of written buffers per program.
   const makeStep = (src: typeof hA, dst: typeof hA) =>
     Fn(() => {
       const i = instanceIndex;
@@ -172,7 +158,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
       const inside = smoothstep(float(R), float(R - 1.2), length(p));
       const dImp = length(p.sub(uImpulse.xy));
       const imp = exp(dImp.mul(dImp).div(uImpulse.z.mul(uImpulse.z)).negate()).mul(uImpulse.w);
-      // The rider presses a shallow dish into the surface; as it moves the dish springs back into a wake.
       const dWake = length(p.sub(uWake.xy));
       const dish = exp(dWake.mul(dWake).div(0.8).negate()).mul(uWake.z).negate();
       const spring = dish.sub(h).mul(0.12).mul(exp(dWake.mul(dWake).div(2.0).negate()));
@@ -202,7 +187,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const finishA = useSim ? makeFinish(hA) : null;
   const finishB = useSim ? makeFinish(hB) : null;
 
-  // Height and normal per mode
   const e = 0.05;
   let heightNode: F;
   let normalWorld: V3;
@@ -227,7 +211,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
     normalWorld = vec3(hx.sub(h0).div(e).negate(), 1, hz.sub(h0).div(e).negate()).normalize();
   }
 
-  // Shading
   const waterRgb = new THREE.Color(theme.water);
   const waterCol = vec3(waterRgb.r, waterRgb.g, waterRgb.b);
   const nView = transformDirection(normalWorld, cameraViewMatrix);
@@ -272,7 +255,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   if (mirrorTarget) water.add(mirrorTarget);
   scene.add(water);
 
-  // Settle the height field before the first frame so normals never start at zero.
   if (useSim && stepAB && finishB) {
     renderer.compute(stepAB);
     renderer.compute(finishB);
@@ -311,7 +293,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
             const a = rand() * Math.PI * 2;
             uImpulse.value.set(Math.cos(a) * r, Math.sin(a) * r, 0.6, 0.06);
           }
-          // A → B then finish from B; next step B → A then finish from A.
           renderer.compute(parity ? stepBA : stepAB);
           renderer.compute(parity ? finishA : finishB);
           uImpulse.value.w = 0;

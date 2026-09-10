@@ -34,8 +34,6 @@ export function GameView() {
       try {
         instance = new Game(canvas);
         gameRef.current = instance;
-        // The backend comes up asynchronously; a rejection here means neither
-        // WebGPU nor WebGL 2 was available.
         instance.start().catch(fail);
       } catch (err: unknown) {
         fail(err);

@@ -24,120 +24,49 @@ import { pinTheme, themeForSeed, type Theme } from "./theme";
 
 const FIXED = 1 / 60;
 const SIT = 1.05;
-/** Eye height above the seat, measured toward the tube axis. */
 const HEAD = 0.42;
-/** A/D push along the wall, m/s²: about 38° of bank at rest against gravity. */
 const LEAN_ACCEL = 16;
-/** Seat pendulum damping ratio: just under critical, so a lean settles with a hint of sway. */
 const BANK_ZETA = 0.9;
-/**
- * Floor on the apparent acceleration the damping is sized against, m/s².
- * Weightless, the seat is a free bead and there is nothing to damp against;
- * without a floor it would be left undamped and swing.
- */
 const BANK_PRESS_FLOOR = 8;
-/** Stiffens the seat pendulum beyond a free bead, so leans answer in a few tenths of a second. */
 const PENDULUM_GAIN = 1.7;
-/** How far the rider floats toward the axis at full airtime, m. */
 const LIFT_MAX = 1.0;
-/** How far the seat sinks into the wall under heavy g, m. */
 const SINK_MAX = 0.18;
-/**
- * How the sheet under the rider moves the seat: how fast the seat follows the
- * water, how fast the draft it is measured against settles, and the metres of
- * heave it may reach.
- *
- * The rider displaces a crater and floats in it, so the water directly under
- * them stands low the whole time they are there. What shakes the seat is what
- * the flume is doing over that, which is the fast half of the same reading.
- */
 const HEAVE_LAMBDA = 11;
 const DRAFT_LAMBDA = 1.1;
 const HEAVE_MAX = 0.3;
-/**
- * How much of the flume's own tilt the rider runs down, and the m/s² it may
- * reach. A float on a tilted surface accelerates along it at the apparent
- * gravity pressing it in — in airtime nothing presses them into anything, so
- * there is no water underfoot to run down — and only part of the rider is in
- * the water. A spike where the field is held at what feeds each end of the
- * flume must not stop the ride.
- */
 const SHEET_PUSH = 0.5;
 const SHEET_PUSH_MAX = 2.5;
-/** Metres down the flume that tilt is measured over: wider than the hull's own crater. */
 const SHEET_BASELINE = 4;
-/** How far down the tube the camera peeks, m. */
 const LOOK_AHEAD = 6;
 const PADDLE_ACCEL = 18;
 const BRAKE_DRAG = 3.4;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;
-/** Whirlpool: seconds to die down when ridden wide; leaning in shortens it. */
 const WHIRL_TIME = 7;
-/** Tightest spiral radius, m. */
 const WHIRL_INNER = 3.2;
-/** Radial speed a full lean buys against the drain, m/s. */
 const WHIRL_LEAN = 3.2;
-/** Seconds the world takes to become the next section's theme; `?fade=` overrides. */
 const THEME_FADE = 1.2;
-/**
- * The rider bobbing back up after being driven under, as a spring: stiffness
- * and damping per second². Under-damped, so the splash carries them down and
- * they surface with a bob rather than rising to rest.
- */
 const PLUNGE_K = 14;
 const PLUNGE_C = 2.6;
-/** Downward speed the splash drives into that spring, m/s: never less, never more. */
 const PLUNGE_MIN = 7;
 const PLUNGE_MAX = 12;
-/**
- * How fast the seat follows the water under it, per second. A float has mass:
- * fast enough to ride a swell, slow enough that a crown outruns it and washes
- * over the rider instead of carrying them.
- */
 const BOB_LAMBDA = 9;
-/** Metres of water the frame takes to change from air to under it. */
 const CROSS_BAND = 0.12;
-/** Degrees of vertical FOV given up under water. */
 const UNDER_FOV = 6;
-/** Bubbles a second at the head of the plume torn under at a splash, and how long it lasts. */
 const PLUNGE_BUBBLES = 6000;
 const PLUME_TIME = 1.1;
-/**
- * How hard the tilt of the water under a float pushes it, m/s² per unit slope.
- * Gravity down a slope is the whole of it, so this is that with the rest of the
- * rider's mass in the water taken off.
- */
 const SLOPE_PUSH = 6;
-/** How fast that shove bleeds off once the water is level again, per second. */
 const SLOPE_DRAG = 1.5;
-/** Fastest the water alone can carry a rider, m/s. */
 const SLOPE_MAX = 2.4;
-/** How fast the seat squares itself onto the water it is riding, per second. */
 const TILT_LAMBDA = 5;
-/** Steepest water the horizon will follow, dh/dx: past this the frame is unreadable. */
 const TILT_MAX = 0.22;
-/** Share of the rider's speed the water they are paddling through is dragged at. */
 const PADDLE_PUSH = 0.55;
-/**
- * Share of the pool's current a floating rider is carried at. Enough that
- * hands off the keys the water takes them to a mouth rather than leaving them
- * parked against the wall.
- */
 const DRIFT = 1.2;
-/** Radius of the crater a rider punches into the pool, m, and drops raining back after. */
 const SPLASH_RADIUS = 2;
 const SPLASH_DROPS = 14;
-/** Forks the section's seed for the raining drops, so they are the run's, not the frame's. */
 const SPLASH_SALT = 0x5314;
-/** Bubbles a second off the rider while they are under. */
 const WAKE_BUBBLES = 1400;
-/**
- * Milliseconds a frame spends building the section behind the next mouth. The
- * geometry yields between meshes, so the frame overruns by at most the largest
- * of them.
- */
 const BUILD_BUDGET = 3;
 
 function makeFrame() {
@@ -177,10 +106,8 @@ const _flumeUp = new THREE.Vector3();
 const _flumeBank = new THREE.Vector3();
 const _bubbleAt = new THREE.Vector3();
 const _white = new THREE.Vector3(1, 1, 1);
-/** What the section's sheet is told about the rider each frame. */
 const _rider = { along: -1, speed: 0, g: 1 };
 
-/** One step of a light toward a theme's colour and intensity; `t` of 1 snaps. */
 function easeLight(light: THREE.Light, hex: number, intensity: number, t: number) {
   _themeColor.set(hex);
   light.color.lerp(_themeColor, t);
@@ -205,18 +132,13 @@ function vFovFromHorizontal(hDeg: number, aspect: number) {
 export class Game {
   private readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGPURenderer;
-  /** Backend actually in use once the renderer has initialised. */
   private backend: "webgpu" | "webgl" | "pending" = "pending";
   private initialized = false;
-  /** GPU timestamp queries, on with `?gpu=1` for the bench; off otherwise, they cost a resolve per frame. */
   private readonly gpuTiming: boolean;
   private readonly meter = new FrameMeter();
-  /** Same shape as the lab prototypes publish, so scripts/lab-bench.mjs can measure the ride. */
   private readonly api: LabApi;
-  /** Bloom and zoom blur; null with `?post=0`, which renders the scene pass straight to the canvas. */
   private post: RidePost | null = null;
   private readonly postOn: boolean;
-  /** The URL knobs, kept for the surfaces that are built after the backend is up. */
   private readonly query: URLSearchParams;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
@@ -231,72 +153,45 @@ export class Game {
   private readonly ambient: THREE.AmbientLight;
   private readonly cavern: THREE.Mesh;
   private readonly floatie: THREE.Mesh;
-  /**
-   * The one whirlpool funnel and pool surface, moved to the pool being ridden
-   * into. Built in start(), because which ripple tier it uses depends on the
-   * backend the renderer settled on.
-   */
   private poolSurface: PoolSurface | null = null;
-  /** The flume's water, moved to the section the rider is in. */
   private sheetField: SheetField | null = null;
-  /** The pool's five lamps, moved to the pool being ridden into. */
   private readonly lamps: Lamps;
-  /**
-   * Sections being built behind the mouths of the pool the rider is in: the
-   * geometry a few milliseconds a frame, then their shaders and pipelines, and
-   * only then into the scene. A section drawn for the first time compiles a
-   * dozen pipelines, which costs seconds of frames that never arrive.
-   */
-  /** How deep in nested renders each pass that draws the world is; see warm.ts. */
   private readonly passDepths = new Map<THREE.Camera, number>();
   private readonly passDepth = (camera: THREE.Camera) => this.passDepths.get(camera) ?? 0;
   private readonly builds: {
-    /** Null for the world the ride opens in, which is in the scene already. */
     exit: RideSection["exits"][number] | null;
     steps: Generator<void, RideSection, void> | null;
     section: RideSection | null;
-    /** What is left to build: one mesh for one pass, a frame apart. */
     warms: (() => Promise<unknown>)[] | null;
     warming: boolean;
   }[] = [];
 
-  /** Spray and mist, simulated in compute; built in start() with the surface. */
   private spray: Spray | null = null;
-  /** Extra vertical FOV, degrees, punched on exit and decaying. */
   private fovPunch = 0;
-  /** The theme the world is becoming, and how long it has left to get there. */
   private themeTarget: Theme | null = null;
   private themeFade = 0;
   private readonly themeFadeTime: number;
   private strokeTimer = 0;
   private whirlSpin = 0;
-  /** Unit vector from the tube axis to the rider's seat on the wall. */
   private readonly radial = new THREE.Vector3();
   private readonly reducedMotion: boolean;
   private current!: RideSection;
   private mode: Mode = "slide";
   private dist = 2;
   private speed = 14;
-  /** Seat angle around the tube's cross-section; 0 is the frame floor, positive is screen-left. */
   private bank = 0;
   private bankVel = 0;
-  /** Airtime float toward the axis, m. */
   private lift = 0;
-  /** Heavy-g sink into the wall, m. */
   private sink = 0;
-  /** The flume's water under the rider: the draft they float at, the heave over it, m. */
   private draft = 0;
   private heave = 0;
-  /** Its tilt down the flume, and how broken it is where they are sitting. */
   private sheetSlope = 0;
   private sheetFoam = 0;
-  /** Apparent acceleration pressing the rider into the wall, m/s² (negative in airtime). */
   private press = GRAVITY;
   private yaw = 0;
   private drop = 1;
   private whirlAngle = 0;
   private whirlR = 8;
-  /** 1 at the splash, 0 when the vortex has died; drains faster the tighter you ride. */
   private whirlEnergy = 0;
   private swirl = 0;
   private px = 0;
@@ -308,16 +203,10 @@ export class Game {
   private hudTick = 0;
   private focused = false;
   private running = false;
-  /** Holds the last frame on the canvas so a capture can be aimed at a moment. */
   private paused = false;
   private raf = 0;
   private disposed = false;
   private whirlWall = 0;
-  /**
-   * What a splash does to the water, in order: the crater and its crown, the
-   * column thrown back up as it closes, the ring left when it collapses, and
-   * the droplets raining back down after. Seconds from the moment of impact.
-   */
   private readonly splashPlan: {
     at: number;
     x: number;
@@ -326,39 +215,24 @@ export class Game {
     amplitude: number;
     shape: number;
     spray?: "crown" | "column";
-    /** What the water is doing here, for the ear: the audio hangs off the same schedule. */
     sound?: SplashPart;
-    /** How high the drop rings, so a shower of them is not a metronome. */
     pitch?: number;
   }[] = [];
   private splashClock = 0;
-  /** Metres the seat is held below where it floats; a splash drives it, buoyancy returns it. */
   private plunge = 0;
   private plungeVel = 0;
-  /** 0 in air, 1 under the water line. */
   private submerged = 0;
-  /** How far the water under the rider stands above its still level, m, followed. */
   private bob = 0;
-  /** Where the water alone is carrying the rider, m/s, and how the seat sits on it. */
   private driftX = 0;
   private driftZ = 0;
   private tiltX = 0;
   private tiltZ = 0;
   private wasUnder = false;
-  /** Seconds of bubble plume left from going under. */
   private bubbleTime = 0;
-  /**
-   * The theme's atmosphere in air and inside the body of water. The scene fog
-   * is mixed between the two, so absorption under water is the fog every
-   * surface already reads rather than a second mechanism.
-   */
   private readonly airFog = { color: new THREE.Color(0x07181c), density: 0.012 };
   private readonly waterFog = { color: new THREE.Color(0x0a4048), density: 0.1 };
-  /** The rider lamp's reach in air; water takes some of it back. */
   private lampRange = 28;
-  /** False until the first click: the rider waits at the tube mouth. */
   private released = false;
-  /** The click can come before the world's shaders do; the rider waits for both. */
   private clicked = false;
   private worldWarm = false;
   private readonly onResize = () => this.resize();
@@ -375,9 +249,6 @@ export class Game {
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.worldSeed = seedFromQuery();
 
-    // WebGPU when the browser has it, the renderer's own WebGL 2 backend
-    // otherwise; ?backend=webgl forces the fallback for testing. The backend
-    // comes up asynchronously in start(); everything below is CPU-side setup.
     const query = new URLSearchParams(window.location.search);
     this.query = query;
     const forceWebGL = query.get("backend") === "webgl";
@@ -409,8 +280,6 @@ export class Game {
             speed: this.speed,
             drop: this.drop,
             theme: this.current.theme.id,
-            // What the surfaces actually settled on, so a bench row records the
-            // tier it measured rather than the one it asked for.
             ...this.poolSurface?.info(),
             spray: this.spray?.info().count ?? 0,
           },
@@ -523,12 +392,6 @@ export class Game {
     });
   }
 
-  /**
-   * Bring the backend up, then run. Rejects when neither WebGPU nor WebGL 2
-   * can be had, with the renderer's message; the view shows it in place of
-   * the canvas. A click during the wait still counts: the rider is released
-   * and starts moving on the first frame.
-   */
   async start(): Promise<void> {
     if (this.running || this.disposed) return;
     try {
@@ -546,7 +409,6 @@ export class Game {
     this.api.ready = true;
     this.resize();
     const options = poolSurfaceOptions(this.query);
-    // The flume first: the pool's inflow reads what it is delivering.
     const flume = createSheetField(this.renderer);
     this.sheetField = flume;
     flume.attach(this.current);
@@ -564,14 +426,8 @@ export class Game {
       this.spray = createSpray(this.renderer, this.scene, spray, surface.waterLineNode);
     }
     if (this.postOn) this.post = createRidePost(this.renderer, this.scene, this.camera);
-    // The world the ride opens in was built before there was a renderer to
-    // build shaders against: the first section, the pool surface, the spray.
-    // It is warmed like any section, over the frames the rider spends waiting
-    // at the mouth and the first flume.
     this.builds.push({ exit: null, steps: null, section: null, warms: null, warming: false });
 
-    // The shared rigs and the bloom exist only now, so the theme lands on them
-    // here rather than in the constructor.
     this.applyTheme(this.current.theme, 1);
     this.running = true;
     this.clock.prev = performance.now();
@@ -647,11 +503,6 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  /**
-   * Ease everything shared toward a theme: fog, background, the four lights,
-   * the bloom, and the pool and spray rigs. `t` of 1 snaps. The meshes a
-   * section owns carry the theme they were built with.
-   */
   private applyTheme(theme: Theme, t: number) {
     _themeColor.set(theme.fog);
     this.airFog.color.lerp(_themeColor, t);
@@ -660,8 +511,6 @@ export class Game {
     this.waterFog.color.lerp(_themeColor, t);
     this.waterFog.density += (theme.pool.under - this.waterFog.density) * t;
     if (this.post) {
-      // The cast the water puts on the whole frame is its hue at full strength,
-      // not its brightness: the fog is what darkens.
       _themeColor.set(theme.water);
       const peak = Math.max(_themeColor.r, _themeColor.g, _themeColor.b, 1e-3);
       _under
@@ -689,11 +538,6 @@ export class Game {
     this.spray?.setTheme(theme, t);
   }
 
-  /**
-   * Advance a theme cross-fade. Each frame closes the share of the remaining
-   * gap that a smoothstep over the fade time asks for, so the ease is
-   * frame-rate independent and lands exactly on the new theme.
-   */
   private fadeTheme(dt: number) {
     const target = this.themeTarget;
     if (!target) return;
@@ -709,12 +553,6 @@ export class Game {
     this.applyTheme(target, (eased - from) / (1 - from));
   }
 
-  /**
-   * Compose the two atmospheres over how far under the water the camera is.
-   * Everything that reads the scene fog — the basin, the tube, the surface
-   * itself, the spray — is absorbed by the body of water for free; the post
-   * stack adds what the eye does, and the lamp gives up half its reach.
-   */
   private applyWaterGrade() {
     const u = this.submerged;
     const fog = this.scene.fog as THREE.FogExp2;
@@ -726,11 +564,6 @@ export class Game {
     if (this.post) this.post.under.value = u;
   }
 
-  /**
-   * How far the camera is under the water it is over, and what that crossing
-   * sets off. The water line is the surface the rider can see, funnel and waves
-   * together, so a swell washing over the eye counts as going under.
-   */
   private updateSubmersion(dt: number) {
     const surface = this.poolSurface;
     const pool = this.current.pool;
@@ -762,9 +595,6 @@ export class Game {
     }
     this.audio.setSubmerged(this.submerged);
     surface?.setUnder(under);
-    // Air comes down with the rider and is dragged along by them, so the plume
-    // is emitted where they are rather than where they went in: at this speed
-    // an anchored column is behind them within a few frames.
     this.bubbleTime = Math.max(0, this.bubbleTime - dt);
     const rate = PLUNGE_BUBBLES * (this.bubbleTime / PLUME_TIME) + (under ? WAKE_BUBBLES : 0);
     if (rate > 0) {
@@ -781,8 +611,6 @@ export class Game {
     const elapsed = (now - this.clock.prev) / 1000;
     this.clock.prev = now;
     if (this.paused) return;
-    // The physics never steps more than a tenth of a second; the meter is told
-    // what the frame actually took.
     const dt = Math.min(elapsed, 0.1);
     this.clock.elapsed += dt;
     this.clock.acc += dt;
@@ -798,7 +626,6 @@ export class Game {
     else this.renderer.render(this.scene, this.camera);
     this.meter.tick(elapsed);
     if (this.gpuTiming) {
-      // Resolve every frame: the query pool is per pass and overflows if resolves are skipped.
       void this.renderer
         .resolveTimestampsAsync(THREE.TimestampQuery.RENDER)
         .then(() => {
@@ -826,7 +653,6 @@ export class Game {
     this.prepareExits();
   }
 
-  /** Held at the tube mouth until the first click: a gentle sway, no descent. */
   private idle() {
     samplePath(this.current.path, this.dist, _frame);
     this.bank = Math.sin(this.clock.elapsed * 1.1) * 0.03;
@@ -846,9 +672,6 @@ export class Game {
     if (throttle > 0) this.speed += PADDLE_ACCEL * throttle * dt;
     if (throttle < 0) this.speed -= BRAKE_DRAG * -throttle * this.speed * dt;
     this.speed -= QUAD_DRAG * this.speed * this.speed * dt;
-    // The water is not level. A rider pushes a bow ahead of them at a crawl and
-    // trails it at speed, so what they are running up or down is their own wave
-    // as much as the flume's.
     this.speed -=
       THREE.MathUtils.clamp(
         Math.max(0, this.press) * this.sheetSlope * SHEET_PUSH,
@@ -870,15 +693,6 @@ export class Game {
     }
   }
 
-  /**
-   * The rider is a bead on the tube's cross-section ring, driven by the apparent
-   * acceleration in their own frame: gravity plus the centrifugal push away from
-   * the curve's centre. Turns press them up the outside wall in proportion to
-   * speed² × curvature; A/D adds a push along the wall. Whatever part of that
-   * acceleration points away from the wall is airtime: the seat floats toward
-   * the axis instead of flipping the rider over, so loop tops and hump crests
-   * read as weightlessness rather than a barrel roll.
-   */
   private updateBank(steer: number, dt: number) {
     const v2 = this.speed * this.speed;
     _accel.set(0, -GRAVITY, 0).addScaledVector(_frame.curvature, -v2);
@@ -888,17 +702,9 @@ export class Game {
     _rhat.copy(_frame.normal).multiplyScalar(-c).addScaledVector(_frame.binormal, -s);
     _that.copy(_frame.normal).multiplyScalar(s).addScaledVector(_frame.binormal, -c);
     const into = _accel.dot(_rhat);
-    // Off the wall, the seat mostly holds its angle and floats instead of sloshing
-    // around the ring; a quarter of the push remains so a rider left high on the
-    // wall after a corkscrew still slides down to the bottom.
     const contact = THREE.MathUtils.clamp(1 + into / 16, 0.25, 1);
     const along = _accel.dot(_that) * contact + steer * LEAN_ACCEL;
     const seat = this.current.path.radius - SIT;
-    // The seat is a pendulum whose stiffness is whatever is pressing the rider
-    // into the wall: a tenth of a g in airtime, three g through a fast turn.
-    // Damping is sized against that stiffness rather than fixed, so a lean
-    // settles the same way at every speed instead of ringing in a hard turn and
-    // going slack through a slow corkscrew.
     const stiffness = (PENDULUM_GAIN * Math.max(Math.abs(into), BANK_PRESS_FLOOR)) / seat;
     const damp = 2 * BANK_ZETA * Math.sqrt(stiffness);
     this.bankVel += ((along * PENDULUM_GAIN) / seat - damp * this.bankVel) * dt;
@@ -912,33 +718,16 @@ export class Game {
     this.press = into;
   }
 
-  /**
-   * The rider as a float held under: buoyancy pulls them back to the surface
-   * and the damping is light, so they come up with a bob rather than gliding
-   * to rest. Positive is metres below where they float.
-   */
   private updatePlunge(dt: number) {
     this.plungeVel += (-PLUNGE_K * this.plunge - PLUNGE_C * this.plungeVel) * dt;
     this.plunge += this.plungeVel * dt;
   }
 
-  /**
-   * The rider sits on the water, so the waves and whatever the field is
-   * carrying under them lift the seat: their own crown, the ring that comes
-   * back off the wall, the swell. Followed rather than tracked, because a float
-   * has mass — and because lagging the crown is what lets it wash over them.
-   */
   private updateBob(dt: number) {
     const chop = this.poolSurface?.chopAt(this.px, this.pz) ?? 0;
     this.bob = expDamp(this.bob, chop, BOB_LAMBDA, dt);
   }
 
-  /**
-   * The water is not level, and a float on a slope slides down it: the bow wave
-   * of the rider's own splash shoves them out of it, the ring off the wall
-   * comes back and shoves them again, and the swell rocks them where nothing
-   * else is happening. The shove bleeds off, so it carries rather than steers.
-   */
   private updateSurf(dt: number) {
     const slope = this.poolSurface?.chopSlopeAt(this.px, this.pz, _slope);
     if (slope) {
@@ -957,7 +746,6 @@ export class Game {
     this.pz += this.driftZ * dt;
   }
 
-  /** The eased normal of the chop under the rider, as its two slope components. */
   private updateTilt(dt: number) {
     const slope = this.reducedMotion
       ? null
@@ -995,8 +783,6 @@ export class Game {
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
     this.planSplash(this.px, this.pz);
-    // The rider goes under: whatever downward speed the flume left them with,
-    // inside a band, so the splash is always a dunk and a fast one is deeper.
     this.plunge = 0;
     this.plungeVel = THREE.MathUtils.clamp(
       -_frame.tangent.y * this.speed * 0.95,
@@ -1011,13 +797,6 @@ export class Game {
     });
   }
 
-  /**
-   * The vortex carries the rider around the pool and drains toward the middle
-   * as it dies. The pool centre is on the rider's left, so A (lean left) pulls
-   * in: a tighter, faster spiral that burns the vortex out sooner. D leans out
-   * to ride it wide and slow, and once it has weakened you can bail at the rim.
-   * A wall-clock cap guarantees the whirlpool always ends.
-   */
   private updateWhirl(dt: number) {
     const pool = this.current.pool;
     const steer = this.input.getSteer();
@@ -1036,9 +815,6 @@ export class Game {
     this.whirlAngle += spin * dt;
     this.px = pool.center.x + Math.sin(this.whirlAngle) * this.whirlR;
     this.pz = pool.center.z + Math.cos(this.whirlAngle) * this.whirlR;
-    // The rider sits on the funnel wall, so leaning in sinks them down the
-    // throat as well as tightening the spiral, and the deepest, tightest part
-    // of it rides low enough that the water washes over them.
     this.updatePlunge(dt);
     this.updateBob(dt);
     const dip = tight * e * 0.4;
@@ -1055,16 +831,10 @@ export class Game {
     this.speed = spin * this.whirlR;
     if (tight > 0.7 && e > 0.4) this.trauma = Math.max(this.trauma, 0.1 + tight * 0.15);
 
-    // Once the vortex has weakened, a rider at the rim can paddle out of it early.
     const bail = e < 0.5 && this.input.getThrottle() > 0.5 && this.whirlR > outerR - 1.0;
     if (this.whirlEnergy <= 0 || bail) this.enterPaddle(spin);
   }
 
-  /**
-   * Write the splash into the water: a crater with a crown standing around it,
-   * a column out of the middle as the crater closes, the ring its collapse
-   * leaves running for the wall, and drops raining back over the next second.
-   */
   private planSplash(x: number, z: number) {
     const plan = this.splashPlan;
     plan.length = 0;
@@ -1098,8 +868,6 @@ export class Game {
       shape: 1,
       sound: "ring",
     });
-    // Where the drops land is part of the run, not of the frame: a seed lays
-    // down the same foam and the same ripples every time it is played.
     const rng = new Rng(forkSeed(this.current.seed, SPLASH_SALT));
     for (let i = 0; i < SPLASH_DROPS; i++) {
       const a = rng.range(0, Math.PI * 2);
@@ -1156,11 +924,7 @@ export class Game {
     this.whirlAngle += this.swirl * 0.12 * dt;
 
     const pool = this.current.pool;
-    // A rider who paddled out at the rim leaves the vortex still turning; it
-    // fills back in under them rather than snapping flat.
     this.whirlEnergy = Math.max(0, this.whirlEnergy - dt * 0.55);
-    // The rider floats on the water, so they go where it goes: the same
-    // current that advects the surface, at a share of it.
     const flow = this.poolSurface?.currentAt(this.px, this.pz, this.whirlEnergy, _flow);
     if (flow) {
       this.px += flow.x * DRIFT * dt;
@@ -1210,7 +974,6 @@ export class Game {
     this.eye.set(this.px, this.py + 0.58, this.pz);
   }
 
-  /** The rider's distance from the middle of the pool they are paddling in. */
   private poolRadius() {
     const pool = this.current.pool;
     return Math.hypot(this.px - pool.center.x, this.pz - pool.center.z);
@@ -1238,12 +1001,6 @@ export class Game {
     this.input.setKeys(["KeyW"]);
   }
 
-  /**
-   * The section behind every mouth of the pool this flume ends in, queued from
-   * the moment the rider enters the flume rather than from ten metres out. A
-   * section takes seconds of shader building it cannot be given at the mouth,
-   * and the rider can leave by any of them.
-   */
   private prepareExits() {
     const nearest = [...this.current.exits].sort(
       (a, b) => this.exitDistance(a) - this.exitDistance(b),
@@ -1257,9 +1014,6 @@ export class Game {
 
   private queueExit(exit: RideSection["exits"][number]) {
     if (exit.next || this.builds.some((b) => b.exit === exit)) return;
-    // Child seeds hang off the parent's seed and the exit taken, so any route
-    // through the tree is the same world on every replay of `?seed=`. The mouth
-    // in the pool wall is already dressed in the theme this returns.
     const seed = exitSeed(this.current.seed, exit.index);
     const start = exit.position.clone();
     const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
@@ -1273,16 +1027,8 @@ export class Game {
     });
   }
 
-  /**
-   * Advance the section at the head of the queue: its geometry up to this
-   * frame's budget, then its shaders, a mesh a frame, while it is still out of
-   * the scene. A frame between meshes is what keeps a build off this one:
-   * generating a shader is a dozen milliseconds and a section has a score.
-   */
   private pumpBuilds() {
     const job = this.builds[0];
-    // A shader can only be built for a pass that has drawn: until then the
-    // frame's target has no size, no samples and no second channel.
     if (!job || job.warming || this.passDepths.size === 0) return;
     if (job.steps) {
       const deadline = performance.now() + BUILD_BUDGET;
@@ -1294,17 +1040,11 @@ export class Game {
       return;
     }
     if (!job.warms) {
-      // Both passes that draw the world get to build their shaders for every
-      // mesh, at every side it is drawn at: the frame's, and the reflection the
-      // pool casts.
       const post = this.post;
       const surface = this.poolSurface;
       const warms: (() => Promise<unknown>)[] = [];
       (job.section ? job.section.group : this.scene).traverse((mesh) => {
         if (!(mesh as Partial<THREE.Mesh>).material) return;
-        // The world's own tube and sheet are on screen from the first frame and
-        // build both their sides as they are drawn. Pinning a side to warm one
-        // of those would be a blink of missing water; a section is nowhere yet.
         const onScreen = job.section === null && !mesh.frustumCulled;
         for (const side of onScreen ? [null] : drawnSides(mesh)) {
           warms.push(() =>
@@ -1334,11 +1074,6 @@ export class Game {
       });
   }
 
-  /**
-   * Into the scene. Called again by the queue when the section finishes
-   * warming, because a mouth reached early takes its section as it stands and
-   * leaves the rest of its shaders to be built behind the rider.
-   */
   private adopt(exit: RideSection["exits"][number] | null, section: RideSection | null) {
     if (!section) this.worldWarm = true;
     if (!exit || !section || exit.next === section) return;
@@ -1351,11 +1086,6 @@ export class Game {
     this.sections.push(section);
   }
 
-  /**
-   * Into the scene now: the mouth was reached before its section was warm. What
-   * the queue has built of it is taken as it stands, shaders and all, rather
-   * than thrown away and built again.
-   */
   private generateExit(exit: RideSection["exits"][number]) {
     if (exit.next) return;
     const job = this.builds.find((b) => b.exit === exit);
@@ -1404,23 +1134,17 @@ export class Game {
     this.poolSurface?.attach(next);
     this.sheetField?.attach(next);
     this.lamps.attach(next);
-    // The other mouths of the pool they just left are behind them now; the
-    // flume they are in may still have shaders to build.
     for (let i = this.builds.length - 1; i >= 0; i--) {
       const job = this.builds[i]!;
       if (job.section === next || job.warming) continue;
       job.section?.dispose();
       this.builds.splice(i, 1);
     }
-    // The mouth was already dressed in this theme, so the tube the rider is now
-    // in matches what they aimed at; the world around it catches up.
     this.themeTarget = next.theme;
     this.themeFade = this.themeFadeTime;
     this.trauma = Math.max(this.trauma, 0.28);
     this.fovPunch = 12;
     this.audio.whoosh();
-    // Refresh the frame now so the very next render aims down the new tube,
-    // not along the previous section's stale tangent.
     samplePath(next.path, this.dist, _frame);
     this.placeOnTube();
     this.prune(prev);
@@ -1448,8 +1172,6 @@ export class Game {
     this.fadeTheme(dt);
     this.fovPunch = expDamp(this.fovPunch, 0, 4, dt);
     if (this.post) {
-      // Radial blur rides the same cues as the FOV: a touch at full speed, a
-      // pull toward the centre on the exit suck-in that decays with the punch.
       const v = Math.abs(this.speed) / MAX_SPEED;
       this.post.zoom.value = this.reducedMotion ? 0 : 0.03 * v * v + (this.fovPunch / 12) * 0.07;
     }
@@ -1489,11 +1211,6 @@ export class Game {
     }
   }
 
-  /**
-   * Feed the flume's water: where the rider's hull is in the channel, how wide
-   * and how deep that channel is there, how fast the flume is running, and what
-   * the pool the last few metres stand in is doing.
-   */
   private updateSheetField(dt: number) {
     const flume = this.sheetField;
     if (!flume) return;
@@ -1510,8 +1227,6 @@ export class Game {
       path.samples.length - 1,
     );
     const sample = path.samples[i]!;
-    // The channel where the rider is, on the gravity their ring was drawn for:
-    // the same half-width the sheet's own vertices normalise against.
     const nominal = THREE.MathUtils.clamp(
       radius * (sheet.depth + sheet.depthG * sample.apparentG),
       0.02,
@@ -1542,16 +1257,6 @@ export class Game {
     flume.update(dt, this.clock.elapsed);
   }
 
-  /**
-   * Read the flume's water back where the rider is sitting in it.
-   *
-   * The seat rides the surface, measured against the draft it settles to, so
-   * the crater the rider holds open under themselves is where they float and
-   * the chute running over it is what lifts and drops them. The tilt down the
-   * flume is taken over a baseline wider than that crater, so what pushes them
-   * is the water rather than the hole they are in. Both ease back to nothing
-   * for a rider who is not in a flume at all.
-   */
   private readSheet(dt: number, flume: SheetField, along: number, lateral: number) {
     if (along < 0) {
       this.heave = expDamp(this.heave, 0, HEAVE_LAMBDA, dt);
@@ -1575,17 +1280,11 @@ export class Game {
     this.sheetSlope = (ahead - behind) / SHEET_BASELINE;
   }
 
-  /**
-   * Feed the pool surface: where the rider's lamp is for its specular lobe,
-   * where the floatie presses the height field, and the vortex's energy.
-   */
   private updatePoolSurface(dt: number) {
     const surface = this.poolSurface;
     if (!surface) return;
     this.riderLight.getWorldPosition(_riderLight);
     surface.setRiderLight(_riderLight);
-    // How hard the rider is working the water they are sitting in, which is
-    // what writes foam behind them.
     const stir =
       this.mode === "whirl"
         ? 0.5 + 0.5 * THREE.MathUtils.clamp(this.whirlEnergy, 0, 1)
@@ -1595,15 +1294,12 @@ export class Game {
             1.2,
           );
     surface.setFloatie(this.px, this.pz, this.mode !== "slide", stir);
-    // Paddling pushes the water: the rider drags what they are sitting in along
-    // with them, and it takes the foam and the ripples with it.
     if (this.mode === "paddle") {
       _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       surface.setPush(_fwd.x * this.speed * PADDLE_PUSH, _fwd.z * this.speed * PADDLE_PUSH);
     } else {
       surface.setPush(0, 0);
     }
-    // The splash, in the order the water does it.
     if (this.splashPlan.length) {
       this.splashClock += dt;
       const waterY = this.current.pool.waterY;
@@ -1630,8 +1326,6 @@ export class Game {
 
   private updateCamera(dt: number) {
     if (this.mode === "slide") {
-      // Aim along the tube, pulled a little toward where the path goes next so
-      // turns and loops read before the rider is in them.
       const path = this.current.path;
       samplePath(path, Math.min(this.dist + LOOK_AHEAD, path.length), _ahead);
       _look.copy(_ahead.position).sub(this.eye);
@@ -1639,9 +1333,6 @@ export class Game {
       else _look.copy(_frame.tangent);
       _fwd.copy(_frame.tangent).multiplyScalar(0.6).addScaledVector(_look, 0.4).normalize();
 
-      // Up is the rider's body up (seat toward axis), eased toward world up while
-      // upright so banked turns tilt the horizon without losing it. Inverted,
-      // body up wins outright: there is no horizon to keep.
       _bodyUp.copy(this.radial).negate();
       const upright = THREE.MathUtils.clamp(_bodyUp.y + 0.5, 0, 1);
       _upProj.copy(_up).addScaledVector(_fwd, -_up.dot(_fwd));
@@ -1663,8 +1354,6 @@ export class Game {
     } else {
       _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       if (this.mode === "whirl") {
-        // Look along the spiral, pulled toward the throat: as the funnel
-        // deepens the rider is looking down into it, not across a flat pool.
         const pool = this.current.pool;
         const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
         _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
@@ -1678,7 +1367,6 @@ export class Game {
         );
         if (_look.lengthSq() > 0.001) {
           _look.normalize();
-          // The stronger the vortex, the more the rider is turned into it.
           _fwd.lerp(_look, 0.16 + 0.2 * e).normalize();
         }
         _fwd.y -= 0.02;
@@ -1687,9 +1375,6 @@ export class Game {
       if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
       _fwd.normalize();
 
-      // Up is the water's own up. On the wall of the funnel that is the surface
-      // normal, tilted toward the throat, so the horizon banks with the vortex
-      // instead of staying level while the rider is visibly on a slope.
       _camUp.copy(_up);
       if (this.mode === "whirl") {
         const pool = this.current.pool;
@@ -1704,8 +1389,6 @@ export class Game {
           _camUp.set(-slope * _poolOut.x, 1, -slope * _poolOut.z).normalize();
         }
       }
-      // The swell and whatever the field is carrying tilt it too, followed at a
-      // float's rate: a crown arriving rolls the horizon before it lifts them.
       this.updateTilt(dt);
       _camUp.x -= this.tiltX;
       _camUp.z -= this.tiltZ;
@@ -1735,19 +1418,11 @@ export class Game {
     this.camera.position.y += bob;
   }
 
-  /**
-   * Drive the spray rig. In the tube the emitter follows the film's contact
-   * with the wall under the rider, which is the seat's own radial: whatever
-   * apparent gravity presses them into is where the sheet is thickest and
-   * where droplets are thrown from.
-   */
   private updateSpray(dt: number) {
     const spray = this.spray;
     if (!spray) return;
     this.riderLight.getWorldPosition(_riderLight);
     if (this.mode === "slide" && this.released) {
-      // The emitter sits on the sheet, not the wall, and is as wide as the
-      // rider's line through it: the chord the water is cut along.
       const sheet = this.current.theme.sheet;
       const radius = this.current.path.radius;
       const depth =
@@ -1781,14 +1456,11 @@ declare global {
       getLift?: () => number;
       getPress?: () => number;
       getWhirl?: () => { energy: number; r: number };
-      /** 0 in air, 1 under the water line. */
       getSubmerged?: () => number;
-      /** Freeze the ride on the frame it is showing, so a capture can be aimed. */
       pause?: (on: boolean) => void;
       getPosition?: () => [number, number, number];
       getSeed?: () => string;
       getTheme?: () => string;
-      /** "webgpu" or "webgl" once the renderer is up, "pending" before. */
       getBackend?: () => string;
       release?: () => void;
       setKeys?: (codes: string[]) => void;

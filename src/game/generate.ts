@@ -28,7 +28,6 @@ export type Exit = {
   angle: number;
   position: THREE.Vector3;
   tangent: THREE.Vector3;
-  /** The theme of the section beyond it, so a mouth advertises where it goes. */
   theme: Theme;
   next: RideSection | null;
 };
@@ -37,7 +36,6 @@ export type PoolData = {
   center: THREE.Vector3;
   radius: number;
   waterY: number;
-  /** Where the flume pours into the pool, on the water line. */
   inflow: THREE.Vector3;
 };
 
@@ -49,25 +47,14 @@ export type RideSection = {
   pool: PoolData;
   exits: Exit[];
   group: THREE.Group;
-  /** Flat stand-in disc; the pool surface rig hides it for the pool it is in. */
   water: THREE.Mesh;
-  /**
-   * The flume's sheet: the metres of tube it covers, which is the field's own
-   * axis, and the switch that hands it the field while the rider is in here.
-   */
   sheet: { span: number; setField: (amount: number) => void };
-  /**
-   * Advance what the section animates. `rider` is where the rider is along this
-   * section's tube (0 to 1, negative when they are elsewhere), how fast, and
-   * the apparent gravity they are pulling: what the sheet answers.
-   */
   tick: (dt: number, elapsed: number, rider: { along: number; speed: number; g: number }) => void;
   dispose: () => void;
 };
 
 type ExitVisual = {
   ring: THREE.Mesh;
-  /** The destination's theme, which is what this mouth is dressed in. */
   theme: Theme;
   index: number;
 };
@@ -76,17 +63,8 @@ type Feature = "drop" | "sweep" | "s" | "helix" | "loop" | "hump";
 
 let nextId = 1;
 
-/** Metres from the water line to the basin floor: deep enough for the funnel's throat. */
 export const BASIN_DEPTH = 5.5;
-/** Metres from the water line to the rim of the wall, clear of the mouths. */
 const POOL_RIM = 7;
-/**
- * How far the entrance tube and the exit mouths reach past the wall, m.
- *
- * Both arrive with the tube floor on the water line, and both stop a short way
- * inside, so nothing cuts the surface and the wall is what the rider shoots out
- * of. The wall is drawn back-face only, so it never blocks the tube it pierces.
- */
 const TUBE_INTO_POOL = 1.6;
 const MOUTH_INTO_POOL = 1;
 
@@ -97,21 +75,10 @@ function pushAlong(points: THREE.Vector3[], dir: THREE.Vector3, dist: number) {
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
 
-/** How hard a mouth is glowing right now; the ring and its lamp share the beat. */
 export function mouthPulse(elapsed: number, index: number) {
   return 0.5 + 0.5 * Math.sin(elapsed * 2.6 + index * 1.9);
 }
 
-/**
- * Write the two per-ring attributes the film and the sheet read: `aDown`, the
- * direction water runs on this wall, and the surface tangent.
- *
- * TubeGeometry lays out `(tubular + 1) x (radial + 1)` vertices, ring by ring,
- * sampling the curve by arc length, so one lookup per ring covers both. The
- * tangent is the ring's own frame rather than `computeTangents`: on a tube the
- * uv derivative it fits is the curve tangent to within half a per cent, and
- * fitting it costs more than building the geometry did.
- */
 function addRingAxes(
   geo: THREE.TubeGeometry,
   tubular: number,
@@ -140,7 +107,6 @@ function addRingAxes(
   geo.setAttribute("tangent", new THREE.BufferAttribute(tangent, 4));
 }
 
-/** The path's apparent-gravity direction at a distance along it. */
 function sampleAt(path: PathData, distance: number) {
   const i = THREE.MathUtils.clamp(Math.round(distance / path.spacing), 0, path.samples.length - 1);
   return path.samples[i]!;
@@ -153,11 +119,9 @@ function sampleApparentDown(path: PathData, distance: number): THREE.Vector3 {
 function sampleApparentG(path: PathData, distance: number): number {
   return sampleAt(path, distance).apparentG;
 }
-/** Cruising slope band (unit-vector y). Every feature starts from inside it. */
 const CRUISE_MIN = -0.34;
 const CRUISE_MAX = -0.1;
 
-/** Unit direction with `dir`'s heading and vertical component `pitch` (negative is down). */
 function withPitch(dir: THREE.Vector3, pitch: number): THREE.Vector3 {
   const p = THREE.MathUtils.clamp(pitch, -0.98, 0.98);
   const h = Math.hypot(dir.x, dir.z);
@@ -177,7 +141,6 @@ function addLeadIn(points: THREE.Vector3[], start: THREE.Vector3, dir: THREE.Vec
   for (let i = 1; i <= 6; i++) pushAlong(points, d, 6.5);
 }
 
-/** Ease back to a cruising slope so the next feature starts from one, never from a plunge. */
 function levelOut(points: THREE.Vector3[], rng: Rng) {
   const dir = lastDir(points);
   if (dir.y <= CRUISE_MAX && dir.y >= CRUISE_MIN) return;
@@ -189,7 +152,6 @@ function levelOut(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Crest, plunge, pull out: steepest mid-way, back at the entry slope by the bottom. */
 function addDrop(points: THREE.Vector3[], rng: Rng) {
   const dir = lastDir(points);
   const entry = THREE.MathUtils.clamp(dir.y, CRUISE_MIN, CRUISE_MAX);
@@ -206,7 +168,6 @@ function addDrop(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Banked turn at a cruising slope; curvature stays 0.01 to 0.04 so speed sets the bank. */
 function addSweep(points: THREE.Vector3[], rng: Rng) {
   const dir = lastDir(points);
   const arc = rng.range(0.7, 1.55) * rng.sign();
@@ -221,7 +182,6 @@ function addSweep(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Two opposite banks; amplitude follows length so peak curvature stays 0.03 to 0.05. */
 function addS(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
@@ -242,16 +202,6 @@ function addS(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/**
- * Corkscrew around a gently descending axis; the radius eases in and out so
- * entry and exit stay smooth.
- *
- * The pitch is capped: a corkscrew whose turn circumference outruns the length
- * it advances is a drum, and a rider who slows down in one keeps their seat but
- * has the whole view swung around them once every few metres. Stretching the
- * feature until it advances at least a share of its own circumference per turn
- * keeps it a roll.
- */
 const HELIX_PITCH = 0.85;
 
 function addHelix(points: THREE.Vector3[], rng: Rng) {
@@ -278,7 +228,6 @@ function addHelix(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Vertical loop tilted onto the entry tangent, so the tube flows straight into it. */
 function addLoop(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
@@ -286,7 +235,6 @@ function addLoop(points: THREE.Vector3[], rng: Rng) {
   if (n.lengthSq() < 0.5) return;
   const radius = rng.range(9, 11.5);
   const steps = 22;
-  // Start and end run side by side; drift keeps a tube diameter between them.
   const drift = rng.range(0.36, 0.55);
   const settle = rng.range(0.06, 0.12);
   const center = pos.clone().addScaledVector(n, radius);
@@ -302,7 +250,6 @@ function addLoop(points: THREE.Vector3[], rng: Rng) {
   }
 }
 
-/** Airtime hill with a sin² profile, so it leaves and rejoins the axis level. */
 function addHump(points: THREE.Vector3[], rng: Rng) {
   const pos = points[points.length - 1]!;
   const dir = lastDir(points);
@@ -341,8 +288,6 @@ function addSplash(points: THREE.Vector3[], rng: Rng, tubeRadius: number): PoolD
   inward.normalize();
 
   const radius = rng.range(14.5, 18.5);
-  // The tube arrives with its floor on the water line and runs level through
-  // the wall, so the last metres never cut the surface.
   const waterY = end.y - tubeRadius;
   const center = end.clone().addScaledVector(inward, radius + 1.1);
   center.y = waterY;
@@ -350,8 +295,6 @@ function addSplash(points: THREE.Vector3[], rng: Rng, tubeRadius: number): PoolD
   const mouth = center.clone().addScaledVector(inward, -(radius - TUBE_INTO_POOL));
   mouth.y = waterY + tubeRadius;
   points.push(mouth);
-  // Out of the wall and down: the rider is in open air over the pool for the
-  // last few metres, and lands with their eye at the water line.
   const splash = center.clone().addScaledVector(inward, -(radius - 5.2));
   splash.y = waterY + 1.35;
   points.push(splash);
@@ -397,7 +340,6 @@ function pickFeatures(rng: Rng, first: boolean): Feature[] {
     if (f === last || (f === "loop" && last === "helix")) {
       f = rng.pick(FEATURES.filter((x) => x !== last && x !== "loop"));
     }
-    // A loop needs the speed of a drop straight into it.
     if (f === "loop" && last !== "drop") out.push("drop");
     out.push(f);
     last = f;
@@ -406,7 +348,6 @@ function pickFeatures(rng: Rng, first: boolean): Feature[] {
   return out.slice(0, 6);
 }
 
-/** The seed a section reached through exit `index` is grown from. */
 export function exitSeed(sectionSeed: number, index: number): number {
   return forkSeed(sectionSeed, index + 1);
 }
@@ -449,11 +390,6 @@ function makeExits(
   return exits;
 }
 
-/**
- * The last metres of tube stand proud of the wall, and the tube is drawn from
- * the inside only, so they need an outside as well: a short sleeve in the
- * basin's own rock, which reads as the flume emerging from it.
- */
 function addSleeve(
   group: THREE.Group,
   path: PathData,
@@ -480,7 +416,6 @@ function addSleeve(
   materials.push(mat);
 }
 
-/** How far along the path the tube is still inside its own walls, m. */
 function tubeEndDistance(path: PathData, pool: PoolData): number {
   const stop = pool.radius - TUBE_INTO_POOL;
   for (let i = path.samples.length - 1; i >= 0; i--) {
@@ -522,11 +457,6 @@ function addRings(
   materials.push(mat);
 }
 
-/**
- * An exit is a lit mouth in the pool wall: the tube itself glows from inside, a
- * pulsing ring frames it, and a light spills onto the water. The pool surface
- * carries the current into it.
- */
 function addMouth(
   group: THREE.Group,
   exit: Exit,
@@ -545,7 +475,6 @@ function addMouth(
   ];
   const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
   const geo = new THREE.TubeGeometry(curve, 12, radius, 10, false);
-  // A mouth is short and level: apparent gravity there is plain gravity.
   addRingAxes(geo, 12, 10, () => DOWN);
   const mat = createMouthMaterial(theme, 9, radius);
   const mesh = new THREE.Mesh(geo, mat);
@@ -554,8 +483,6 @@ function addMouth(
   geometries.push(geo);
   materials.push(mat);
 
-  // The same sheet the tube beyond it runs, so the water does not stop at the
-  // mouth and start again inside.
   const sheetGeo = buildSheet(curve, 12, 10, radius, () => 1, () => DOWN);
   const sheetMat = createSheetMaterial(theme, 9, radius);
   const sheetMesh = new THREE.Mesh(sheetGeo, sheetMat);
@@ -593,9 +520,6 @@ function* assembleMeshes(
   const tubular = Math.max(70, Math.min(200, Math.floor(path.length / 1.7)));
   const tubeGeo = new THREE.TubeGeometry(path.curve, tubular, path.radius, RADIAL, false);
   addRingAxes(tubeGeo, tubular, RADIAL, (u) => sampleApparentDown(path, u * path.length));
-  // TubeGeometry indexes ring by ring, so drawing a prefix of the index buffer
-  // stops the tube where it enters the pool: the rest of the path is the
-  // rider's flight over the water.
   const stop = tubeEndDistance(path, pool);
   const rings = THREE.MathUtils.clamp(Math.round((stop / path.length) * tubular), 1, tubular);
   tubeGeo.setDrawRange(0, rings * RADIAL * 6);
@@ -634,9 +558,6 @@ function* assembleMeshes(
   addSleeve(group, path, stop, pool, theme, geometries, materials);
   yield;
 
-  // The basin runs from the rim down past the throat of the whirlpool funnel,
-  // so the vortex never pokes through the floor and refraction has a closed
-  // bowl to look into rather than the void beyond an open-sided cylinder.
   const wallHeight = BASIN_DEPTH + POOL_RIM;
   const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 64, 1, true);
   const wallMat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "wall");
@@ -690,8 +611,6 @@ function* assembleMeshes(
     tick: (dt, elapsed, rider) => {
       scrollTube(tubeMat, dt, rider.speed);
       scrollTube(sheetMat, dt, rider.speed);
-      // How hard the rider ploughs is how much water they are moving: nothing
-      // at a standstill, all of it at speed.
       ploughSheet(
         sheetMat,
         rider.along,
@@ -712,29 +631,10 @@ function* assembleMeshes(
   };
 }
 
-/**
- * How deep the sheet of water stands in the tube, as a share of the tube radius
- * at rest and per extra g on top, capped: a flume runs more water where it
- * presses harder, and the whole tube is never full.
- */
 const SHEET_G_CAP = 3;
-/** How much finer than the tube the sheet is drawn, along it and around it. */
 const SHEET_ALONG = 2;
 const SHEET_RADIAL = 48;
 
-/**
- * The sheet of water the flume runs, built on the tube's own curve.
- *
- * It carries the apparent gravity of each ring; the levelling happens in the
- * vertex stage, so how deep the water stands can answer the rider rather than
- * being fixed when the section is built. `aG` is the nominal apparent gravity
- * along the tube, which is what the water levels to everywhere the rider is not.
- *
- * It is drawn finer than the tube it lies in, because the tube's rings are what
- * the field would otherwise be facetted by: the wetted arc is a fifth of the
- * ring, so most of the extra vertices go across the channel, where the field's
- * waves run in and out of the banks.
- */
 function buildSheet(
   curve: THREE.Curve<THREE.Vector3>,
   tubular: number,
@@ -758,10 +658,6 @@ function buildSheet(
 const MOUTH_CLEARANCE = 16;
 const GENERATION_ATTEMPTS = 6;
 
-/**
- * True when the tube stays out of every pool in `avoid` once past its own
- * mouth, its pool does not overlap them, and it never runs back through itself.
- */
 function layoutIsClear(path: PathData, pool: PoolData, avoid: PoolData[]): boolean {
   for (const other of avoid) {
     const dx = pool.center.x - other.center.x;
@@ -805,10 +701,7 @@ export function* sectionSteps(
   let cleaned!: THREE.Vector3[];
   let radius = 2.75;
   for (let attempt = 0; attempt < GENERATION_ATTEMPTS; attempt++) {
-    // Retries fork the same seed, so a rejected layout is skipped identically on replay.
     rng = new Rng(attempt === 0 ? seed : forkSeed(seed, 7919 * attempt));
-    // The splash needs the radius: it sets the water line from where the tube
-    // floor meets it.
     radius = rng.range(2.55, 2.95);
     const points: THREE.Vector3[] = [];
     addLeadIn(points, start, startDir);
@@ -843,7 +736,6 @@ export function* sectionSteps(
   };
 }
 
-/** The same build, run to the end in one go: the first section, and the failsafe. */
 export function generateSection(
   seed: number,
   start: THREE.Vector3,

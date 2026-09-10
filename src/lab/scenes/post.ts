@@ -32,7 +32,6 @@ import {
 type F = Node<"float">;
 type V4 = Node<"vec4">;
 
-/** Zoom blur toward the screen centre; strength scales the tap length, falloff spares the centre. */
 const zoomBlur = Fn(([inputNode, strength]: [V4, F]) => {
   const tex = convertToTexture(inputNode);
   const uvNode = uv();
@@ -47,11 +46,6 @@ const zoomBlur = Fn(([inputNode, strength]: [V4, F]) => {
   return acc.div(taps);
 });
 
-/**
- * Post stack on a representative tube with glowing exit rings: scene pass with
- * MRT (colour + emissive), bloom on the emissive channel, then a radial zoom
- * blur for speed. Mirrors what the ride already assumes exists.
- */
 export async function createScene(canvas: HTMLCanvasElement, params: LabParams): Promise<LabScene> {
   const nr = await createNodeRenderer(canvas, params);
   const { renderer } = nr;
@@ -82,7 +76,6 @@ export async function createScene(canvas: HTMLCanvasElement, params: LabParams):
   const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 720, radius, 24, true), tubeMat);
   scene.add(tube);
 
-  // Exit rings every ~30 m, emissive like createExitRingMaterial().
   const ringMat = new THREE.MeshStandardNodeMaterial({
     color: theme.accent,
     roughness: 0.25,

@@ -12,9 +12,7 @@ export type SceneLoader = () => Promise<SceneModule>;
 
 type Props = {
   title: string;
-  /** TSL scene on WebGPURenderer; also serves ?backend=webgl through the WebGL 2 backend. */
   node: SceneLoader;
-  /** Optional classic WebGLRenderer + GLSL baseline for ?backend=glsl. */
   gl?: SceneLoader;
   notes?: string[];
 };
@@ -22,10 +20,6 @@ type Props = {
 const BACKENDS = ["webgpu", "webgl", "glsl"] as const;
 const RESOLUTIONS = ["window", "2560x1080", "3440x1440"] as const;
 
-/**
- * Canvas + overlay shared by every /lab prototype. Loads the scene module
- * lazily on the client, runs the frame loop, and publishes window.__lab.
- */
 export function LabView({ title, node, gl, notes = [] }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const loaders = useRef({ node, gl });
@@ -131,7 +125,6 @@ export function LabView({ title, node, gl, notes = [] }: Props) {
       scene?.dispose();
       if (window.__lab === api) delete window.__lab;
     };
-    // Loaders are read through a ref so a re-render never restarts the scene.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

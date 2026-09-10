@@ -1,11 +1,9 @@
 import * as THREE from "three";
 import { createGlTimer, type LabParams } from "./harness";
 
-/** Classic WebGLRenderer bootstrap for the GLSL baselines, timed with EXT_disjoint_timer_query_webgl2 when present. */
 export type GlRenderer = {
   renderer: THREE.WebGLRenderer;
   backend: "glsl";
-  /** Run one frame of GL work inside a GPU timer query. */
   timed: (fn: () => void) => void;
   gpuMs: () => number | null;
   info: () => { drawCalls: number; triangles: number };
@@ -26,7 +24,6 @@ export function createGlRenderer(canvas: HTMLCanvasElement, params: LabParams): 
   renderer.toneMappingExposure = 1.05;
   const gl = renderer.getContext() as WebGL2RenderingContext;
   const timer = createGlTimer(gl);
-  // Count draw calls per frame, not per render() call, so composer passes add up.
   renderer.info.autoReset = false;
   return {
     renderer,

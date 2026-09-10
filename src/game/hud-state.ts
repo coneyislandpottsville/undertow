@@ -9,7 +9,6 @@ export type HudState = {
   mode: RideMode;
   drop: number;
   depth: number;
-  /** Apparent g pressing the rider into the wall; below zero is airtime. */
   g: number;
   hint: string;
   exits: number;
