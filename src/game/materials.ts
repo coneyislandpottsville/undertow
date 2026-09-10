@@ -244,14 +244,16 @@ export function createTubeMaterial(
   const screen = theme.screen;
 
   const mat = new THREE.MeshPhysicalNodeMaterial({
-    side: THREE.BackSide,
+    side: mouth ? THREE.DoubleSide : THREE.BackSide,
     metalness: film.metalness,
     emissive: new THREE.Color(theme.tube),
     emissiveIntensity: film.glow,
   });
   mat.colorNode = wallColor.mul(filmTint).add(panel);
   const glow = materialEmissive.add(panel.mul(screen.glow));
-  mat.emissiveNode = mouth ? glow.mul(glowFalloff()) : glow;
+  mat.emissiveNode = mouth
+    ? glow.mul(glowFalloff(MOUTH_GLOW_FAR, MOUTH_GLOW_FLOOR)).mul(MOUTH_GLOW_BOOST)
+    : glow;
   const relief = vec3(
     tn.xy.mul(mix(float(film.normalDry), float(film.normalWet), wet)).add(mould.xy.mul(WALL_RELIEF)),
     1,
@@ -444,12 +446,15 @@ export function createWaterMaterial(theme: Theme): THREE.MeshStandardNodeMateria
 const GLOW_NEAR = 1.6;
 const GLOW_FAR = 14;
 const GLOW_FLOOR = 0.12;
+const MOUTH_GLOW_FAR = 7;
+const MOUTH_GLOW_BOOST = 2.5;
+const MOUTH_GLOW_FLOOR = 0.55;
 
-function glowFalloff(): Node<"float"> {
+function glowFalloff(far = GLOW_FAR, floor = GLOW_FLOOR): Node<"float"> {
   const d = length(cameraPosition.sub(positionWorld));
-  return smoothstep(GLOW_NEAR, GLOW_FAR, d)
-    .mul(1 - GLOW_FLOOR)
-    .add(GLOW_FLOOR);
+  return smoothstep(GLOW_NEAR, far, d)
+    .mul(1 - floor)
+    .add(floor);
 }
 
 function bumpNormal(height: Node<"float">, scale: number): Node<"vec3"> {
