@@ -695,11 +695,7 @@ export class Game {
 
     if (_frame.tangent.y > 0.55 && this.speed > 22) this.trauma = Math.max(this.trauma, 0.22);
 
-    const pool = this.current.pool;
-    const toPool = Math.hypot(_frame.position.x - pool.center.x, _frame.position.z - pool.center.z);
-    if (this.dist >= path.length - 1.4 || toPool < pool.radius - path.radius) {
-      this.enterWhirl();
-    }
+    if (this.dist >= path.length - 2.2) this.enterWhirl();
   }
 
   private updateBank(steer: number, dt: number) {
@@ -813,7 +809,6 @@ export class Game {
     this.py = pool.waterY + 0.55;
     this.seatInPool();
     this.snapCam = true;
-    this.current.hideFlume();
     this.lamps.attach(this.current);
     useHud.getState().patch({
       mode: "whirl",
@@ -947,6 +942,20 @@ export class Game {
     _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.px += _fwd.x * this.speed * dt;
     this.pz += _fwd.z * this.speed * dt;
+
+    const inlet = this.current.pool.inflow;
+    const dIn = Math.hypot(this.px - inlet.x, this.pz - inlet.z);
+    const inletR = this.current.path.radius + 1.6;
+    if (dIn < inletR) {
+      const push = (inletR - dIn) / inletR;
+      const ix = this.px - inlet.x;
+      const iz = this.pz - inlet.z;
+      const il = Math.hypot(ix, iz) || 1;
+      this.px += (ix / il) * push * 8 * dt;
+      this.pz += (iz / il) * push * 8 * dt;
+      const into = _fwd.x * (ix / il) + _fwd.z * (iz / il);
+      if (into < 0) this.speed *= 1 - 1.8 * dt;
+    }
 
     this.swirl = expDamp(this.swirl, 0, 0.7, dt);
     this.px += Math.cos(this.whirlAngle) * this.swirl * dt;
@@ -1117,6 +1126,7 @@ export class Game {
     }
     exit.next = section;
     this.stage(section);
+    section.group.visible = true;
     if (!this.sections.includes(section)) this.sections.push(section);
   }
 
@@ -1207,12 +1217,6 @@ export class Game {
     this.sheetField?.attach(next);
     this.lamps.attach(prev);
     this.snapCam = true;
-    for (let i = this.builds.length - 1; i >= 0; i--) {
-      const job = this.builds[i]!;
-      if (job.section === next || job.warming) continue;
-      job.section?.dispose();
-      this.builds.splice(i, 1);
-    }
     this.themeTarget = next.theme;
     this.themeFade = this.themeFadeTime;
     this.trauma = Math.max(this.trauma, 0.28);
@@ -1231,7 +1235,9 @@ export class Game {
 
   private prune(justLeft: RideSection) {
     const keep = new Set<RideSection>([this.current, justLeft]);
-    for (const e of justLeft.exits) if (e.next) keep.add(e.next);
+    for (const s of [justLeft, this.current]) {
+      for (const e of s.exits) if (e.next) keep.add(e.next);
+    }
     for (let i = this.sections.length - 1; i >= 0; i--) {
       const s = this.sections[i]!;
       if (!keep.has(s)) {
