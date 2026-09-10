@@ -379,7 +379,7 @@ function makeExits(
   if (inward.lengthSq() < 1e-6) inward.set(0, 0, 1);
   inward.normalize();
   const aEnter = Math.atan2(-inward.x, -inward.z);
-  const count = rng.chance(0.38) ? 3 : 2;
+  const count = 3;
   const span = Math.PI * 1.2;
   const startA = aEnter + Math.PI - span / 2;
   const step = span / (count - 1);
@@ -617,6 +617,7 @@ function* assembleMeshes(
   const wallGeo = new THREE.CylinderGeometry(pool.radius, pool.radius, wallHeight, 96, 1, true);
   const wallMat = createBasinMaterial(theme, pool.waterY, POOL_RIM, "wall", holes);
   const wall = new THREE.Mesh(wallGeo, wallMat);
+  wall.frustumCulled = false;
   wall.position.copy(pool.center);
   wall.position.y = wallY;
   group.add(wall);

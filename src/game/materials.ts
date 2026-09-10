@@ -556,7 +556,7 @@ export function createBasinMaterial(
 
   const mat = new THREE.MeshStandardNodeMaterial({
     metalness: pool.wallMetal,
-    side: surface === "wall" ? THREE.BackSide : THREE.DoubleSide,
+    side: THREE.DoubleSide,
   });
   mat.colorNode = mix(rock, soaked, wet).mul(fade).mul(shade).add(color(theme.ring).mul(line));
   mat.normalNode = bumpNormal(shape, flat ? 0.9 : 2.2);

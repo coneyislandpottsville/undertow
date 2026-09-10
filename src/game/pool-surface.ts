@@ -82,21 +82,21 @@ export const UNREFLECTED = 1;
 
 const FOAM_LIFE = 2.6;
 const FOAM_CHURN = 1.4;
-const FOAM_LIP = 1.2;
+const FOAM_LIP = 0.28;
 const FOAM_WAKE = 0.35;
 const FOAM_INFLOW = 0.5;
 const INFLOW_CHURN = 0.18;
 const INFLOW_GRIP = 0.05;
 const INFLOW_SURGE = 0.5;
-const FOAM_LAP = 0.7;
+const FOAM_LAP = 0.12;
 const BREAK_LOW = 0.35;
 const BREAK_HIGH = Math.tan(Math.PI / 6);
 const FOAM_BREAK = 2.2;
 const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-STEP / FOAM_LIFE);
 const FOAM_MAX = 0.9;
-const FOAM_ONSET = 0.02;
-const FOAM_FULL = 0.42;
+const FOAM_ONSET = 0.1;
+const FOAM_FULL = 0.58;
 const FOAM_WASH = 0.45;
 const FIELD_PRIME = 150;
 const FIELD_CATCHUP = 8;
@@ -335,8 +335,8 @@ export function createPoolSurface(
     const lip = smoothstep(0.16, 0.02, abs(rho.sub(lipRho))).mul(uEnergy).mul(FOAM_LIP);
     const wake = exp(dWake.mul(dWake).div(1.6).negate()).mul(uWake.w).mul(FOAM_WAKE);
     const inflow = landing.mul(abs(delivered).mul(4).add(1)).mul(FOAM_INFLOW);
-    const lapping = smoothstep(uRadius.sub(1.8), uRadius.sub(0.2), r)
-      .mul(here.x.mul(6).add(0.25).clamp(0, 2))
+    const lapping = smoothstep(uRadius.sub(0.55), uRadius.sub(0.08), r)
+      .mul(here.x.mul(3).add(0.08).clamp(0, 1))
       .mul(FOAM_LAP);
     const struck = abs(imp).mul(FOAM_SPLASH);
     const born = churn.add(breaking).add(lip).add(wake).add(inflow).add(lapping).add(struck);
