@@ -47,31 +47,41 @@ The whole loop runs. Generation, themes, audio, and the physics of the ride
 work. Performance targets are met on WebGPU.
 
 **The ride does not look good, and that is the open problem.** Reviewed against
-captures on 2026-09-10:
+captures on 2026-09-10, after Build 11:
 
-- There is a sky now: a procedural starfield on the cavern, which is no longer
-  on the `UNREFLECTED` layer, so the pool has something to reflect. `theme.fog`
-  fades the horizon band. Real constellations from a geocoord and a date are
-  wanted later; the seam is `createSky` in `materials.ts`.
-- Foam is a thresholded texture fetch and reads as hard-edged decals sitting on
-  the surface rather than as coverage.
-- The pool's reflection plane is pinned to `funnelHeight` at the *rider's*
-  radius (`pool-surface.ts`), so every reflection slides as the rider moves and
-  a bright exit ring reads as a second object rather than a mirror image.
-- The landing into the pool has no visible spray. `planSplash` schedules a
-  900-droplet crown at t=0 and a column at t=0.3, and neither appears on screen
-  at any point in the first second after impact at 87 km/h. Not yet diagnosed;
-  the emitters place spray at `waterY + 0.2` (the flat still-line), while the
-  surface now sits above that since the swell became the field's rest line.
-- The authored wall and basin maps read as speckle or dither noise at most
-  ranges, not as moulding or rock.
-- The darker themes (neon, abyss) have almost no value range: one hue, no darks
-  or lights, so nothing reads as shape.
-- Mouths and exit rings are ten-sided: `addMouth` builds the stub with 10 radial
-  segments and the ring reads its silhouette.
+- Foam ramps with coverage now instead of cutting out at a noise threshold, but
+  it still reads as surface whitening rather than as three-dimensional froth.
+- The wall and basin maps are metre-scale and the fine relief no longer drives
+  the normal at every range. Strata read as moulding at distance; pressed
+  against the wall in `paddle` they are still flat bands with little rock in
+  them.
+- `abyss` and `neon` have a value range now. Their pools read; the neon flume is
+  still one hue of cyan line-work on black.
+- The landing throws a churn patch and a few droplets. It is not a wall of
+  water. The bow wave carries with the rider now (`setBowWave` in `game.ts`),
+  but the last tuning of `BOW_THROW` and `BOW_WIDTH` was never confirmed against
+  a capture.
+- Real constellations from a geocoord and a date are wanted later; the seam is
+  `createSky` in `materials.ts`.
 
 Fixed on 2026-09-10:
 
+- **Reflections slid with the camera.** `pool-surface.ts` set the mirror plane
+  from `funnelHeight` at the *rider's* radius every frame. It is anchored to the
+  pool rest level, and the mirror UV offset grows with distance, so a reflection
+  breaks up instead of reading as a second object beside its source.
+- **The landing spray never reached the screen.** Not an emission failure: 900
+  particles fired at t=0. `enterWhirl` gives full whirlpool energy at once, so
+  the orbit is 25 m/s from the first frame. Against the view axis the entry
+  point is 27° below centre at t=0, at the frame edge by 0.058 s, gone by
+  0.078 s, and behind the camera from 0.09 s for the rest of the second; the
+  column at 0.29 s fired 5.8 m behind the head while `submerged` was 0.82. Spray
+  is emitted at the live water line rather than the flat still-line, bursts
+  carry their own origin, bubbles and the sheet take turns instead of bubbles
+  starving the sheet, and the rider carries a bow wave while carving the pool.
+- **Mouths, exit rings and the rings inside the tube were faceted.** The in-tube
+  ring was a 20-sided hoop passed every 5.2 m. 152728 → 219238 triangles, draw
+  calls unchanged at 24, no change in frame rate.
 - **The rider could not leave the first pool.** At the rim `updatePaddle` cut
   speed by 0.45 *per frame* while the rider faced outward, so contact was a
   permanent stop: 38 s of holding W moved the rider five metres. The rim now
