@@ -91,6 +91,8 @@ export function buildPath(points: THREE.Vector3[], radius: number, spacing = 0.8
     _negT.copy(tangent).negate();
     _mat.makeBasis(binormal, normal, _negT);
     const quat = new THREE.Quaternion().setFromRotationMatrix(_mat);
+    const prev = samples[i - 1];
+    if (prev && quat.dot(prev.quat) < 0) quat.set(-quat.x, -quat.y, -quat.z, -quat.w);
     samples.push({
       position: spaced[i]!.clone(),
       tangent,
