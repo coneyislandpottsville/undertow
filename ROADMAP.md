@@ -47,34 +47,50 @@ The whole loop runs. Generation, themes, audio, and the physics of the ride
 work. Performance targets are met on WebGPU.
 
 **The ride does not look good, and that is the open problem.** Reviewed against
-captures on 2026-09-09:
+captures on 2026-09-10:
 
-- **A large dark shape holds its screen position while turning in the pool.**
-  Undiagnosed. Only `riderLight` and `floatie` are parented to the camera, and
-  `cavern` copies the camera position each frame at `game.ts:1410`; none of the
-  three obviously matches, since the floatie torus sits at `(0, -0.78, -0.55)`
-  and should read bottom-centre. Reproduce by paddling and turning on the spot.
-- Fixed in the working tree, not yet committed: the flume sheet drew hard-edged
-  slivers through the tube and pool because `normalize(cross(up, tangent))` in
-  `materials.ts` went NaN wherever apparent gravity ran along the tube — every
-  steep drop. NaN reached `positionNode`. It now falls back to the ring
-  bitangent below a degree of separation.
-- There is no sky or environment, so the water has nothing to reflect. This is
-  the single largest reason the surface reads as flat coloured plastic rather
-  than water.
+- There is a sky now: a procedural starfield on the cavern, which is no longer
+  on the `UNREFLECTED` layer, so the pool has something to reflect. `theme.fog`
+  fades the horizon band. Real constellations from a geocoord and a date are
+  wanted later; the seam is `createSky` in `materials.ts`.
 - Foam is a thresholded texture fetch and reads as hard-edged decals sitting on
   the surface rather than as coverage.
+- The pool's reflection plane is pinned to `funnelHeight` at the *rider's*
+  radius (`pool-surface.ts`), so every reflection slides as the rider moves and
+  a bright exit ring reads as a second object rather than a mirror image.
 - The landing into the pool has no visible spray. `planSplash` schedules a
   900-droplet crown at t=0 and a column at t=0.3, and neither appears on screen
   at any point in the first second after impact at 87 km/h. Not yet diagnosed;
-  the emitters place spray at `waterY + 0.2` (the flat still-line) at
-  `game.ts:1615`, while the surface now sits above that since the swell became
-  the field's rest line.
+  the emitters place spray at `waterY + 0.2` (the flat still-line), while the
+  surface now sits above that since the swell became the field's rest line.
 - The authored wall and basin maps read as speckle or dither noise at most
   ranges, not as moulding or rock.
 - The darker themes (neon, abyss) have almost no value range: one hue, no darks
   or lights, so nothing reads as shape.
-- Exit rings are visibly polygonal.
+- Mouths and exit rings are ten-sided: `addMouth` builds the stub with 10 radial
+  segments and the ring reads its silhouette.
+
+Fixed on 2026-09-10:
+
+- **The rider could not leave the first pool.** At the rim `updatePaddle` cut
+  speed by 0.45 *per frame* while the rider faced outward, so contact was a
+  permanent stop: 38 s of holding W moved the rider five metres. The rim now
+  redirects along its tangent and scrubs only the head-on part of the motion.
+  `scripts/loop-smoke.mjs` holds W and nothing else and fails if a pool keeps
+  the rider; it is the regression test that was missing. Before the fix the
+  ride reached drop 1 in 60 s, after it reaches drop 4 in 70 s.
+- **Whole unridden sections were visible from the pool.** Five complete
+  sections sat in the scene at every whirlpool, each in its own theme, so the
+  next flume's alpha-tested sheet hung over the water as torn ribbons. A
+  section is hidden until the rider enters it. Ridden sections stay visible on
+  purpose: seeing the tubes already ridden is wanted, and worth expanding.
+- **The mouth stub wrapped the rider on entry.** The stub duplicates the first
+  metres of the next flume and is `DoubleSide`, so entering an exit flew the
+  rider through it. `hideMouth` drops the stub, sheet and ring of the exit
+  taken.
+- Mouths were a hoop around a black hole; the stub's throat now lifts toward
+  its far end so it reads as a passage, and the exit ring's emissive is scaled
+  back so it stops blowing out to white.
 
 Knobs: `?seed=`, `?theme=`, `?screen=`, `?fade=`, `?backend=`, `?post=0`,
 `?reflect=`, `?refract=`, `?foam=`, `?spray=`, `?spraysize=`, `?gpu=1`.
@@ -140,6 +156,8 @@ wall and basin maps authored rather than procedural noise.
 
 - Every build passes build, typecheck, lint, and browser smoke on dev and built
   output (see `AGENTS.md`). Controls self-test proves A is screen-left.
+- `scripts/loop-smoke.mjs` plays the loop on W alone and fails when a pool holds
+  the rider. Non-negotiable 2 is a claim about play, so it is tested by playing.
 - Judge visual work by looking at captures, not by the bench table. Builds 5–9
   improved measured frame time while the ride's appearance did not improve, and
   the bench did not show that.

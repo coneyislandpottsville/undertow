@@ -49,12 +49,14 @@ export type RideSection = {
   group: THREE.Group;
   water: THREE.Mesh;
   sheet: { span: number; setField: (amount: number) => void };
+  hideMouth: (index: number) => void;
   tick: (dt: number, elapsed: number, rider: { along: number; speed: number; g: number }) => void;
   dispose: () => void;
 };
 
 type ExitVisual = {
   ring: THREE.Mesh;
+  stub: THREE.Object3D[];
   theme: Theme;
   index: number;
 };
@@ -502,7 +504,7 @@ function addMouth(
   geometries.push(ringGeo);
   materials.push(ringMat);
 
-  return { ring, theme, index: exit.index };
+  return { ring, stub: [mesh, sheetMesh, ring], theme, index: exit.index };
 }
 
 function* assembleMeshes(
@@ -510,7 +512,7 @@ function* assembleMeshes(
   pool: PoolData,
   exits: Exit[],
   theme: Theme,
-): Generator<void, Pick<RideSection, "group" | "water" | "sheet" | "tick" | "dispose">, void> {
+): Generator<void, Pick<RideSection, "group" | "water" | "sheet" | "hideMouth" | "tick" | "dispose">, void> {
   const group = new THREE.Group();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -608,6 +610,12 @@ function* assembleMeshes(
     group,
     water,
     sheet: { span: sheetSpan, setField: (amount) => setSheetField(sheetMat, amount) },
+    hideMouth: (index) => {
+      for (const v of exitVisuals) {
+        if (v.index !== index) continue;
+        for (const o of v.stub) o.visible = false;
+      }
+    },
     tick: (dt, elapsed, rider) => {
       scrollTube(tubeMat, dt, rider.speed);
       scrollTube(sheetMat, dt, rider.speed);

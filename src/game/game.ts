@@ -7,7 +7,7 @@ import { atSide, drawnSides, watchPassDepth } from "./warm";
 import { useHud, type RideMode } from "./hud-state";
 import { Input } from "./input";
 
-import { flumeFlow, setScreenSource } from "./materials";
+import { createSky, flumeFlow, setScreenSource, type Sky } from "./materials";
 import { createRidePost, type RidePost } from "./post";
 import {
   UNREFLECTED,
@@ -43,6 +43,8 @@ const BRAKE_DRAG = 3.4;
 const POOL_ACCEL = 13;
 const POOL_DRAG = 1.9;
 const POOL_TURN = 2.35;
+const RIM_KEEP = 0.55;
+const RIM_STOP = 0.5;
 const WHIRL_TIME = 7;
 const WHIRL_INNER = 3.2;
 const WHIRL_LEAN = 3.2;
@@ -152,6 +154,7 @@ export class Game {
   private readonly sun: THREE.DirectionalLight;
   private readonly ambient: THREE.AmbientLight;
   private readonly cavern: THREE.Mesh;
+  private readonly sky: Sky;
   private readonly floatie: THREE.Mesh;
   private poolSurface: PoolSurface | null = null;
   private sheetField: SheetField | null = null;
@@ -312,11 +315,10 @@ export class Game {
     this.camera.add(this.riderLight);
     this.riderLight.position.set(0, 0.35, -1.1);
 
-    const cavernGeo = new THREE.SphereGeometry(170, 24, 16);
-    const cavernMat = new THREE.MeshBasicNodeMaterial({ color: 0x05090c, side: THREE.BackSide });
-    this.cavern = new THREE.Mesh(cavernGeo, cavernMat);
+    const cavernGeo = new THREE.SphereGeometry(170, 48, 32);
+    this.sky = createSky();
+    this.cavern = new THREE.Mesh(cavernGeo, this.sky.material);
     this.cavern.frustumCulled = false;
-    this.cavern.layers.set(UNREFLECTED);
     this.scene.add(this.cavern);
 
     const floatGeo = new THREE.TorusGeometry(0.4, 0.09, 8, 22);
@@ -505,6 +507,7 @@ export class Game {
 
   private applyTheme(theme: Theme, t: number) {
     _themeColor.set(theme.fog);
+    this.sky.setHorizon(theme.fog, t);
     this.airFog.color.lerp(_themeColor, t);
     this.airFog.density += (theme.fogDensity - this.airFog.density) * t;
     _themeColor.set(theme.water).multiplyScalar(theme.pool.underShade);
@@ -959,8 +962,23 @@ export class Game {
       const s = maxR / r;
       this.px = pool.center.x + dx * s;
       this.pz = pool.center.z + dz * s;
-      const radial = (_fwd.x * dx + _fwd.z * dz) / r;
-      if (radial > 0) this.speed *= 0.45;
+      const nx = dx / r;
+      const nz = dz / r;
+      const radial = _fwd.x * nx + _fwd.z * nz;
+      if (radial > 0) {
+        let sx = _fwd.x - nx * radial;
+        let sz = _fwd.z - nz * radial;
+        const along = Math.hypot(sx, sz);
+        if (along > 1e-3) {
+          sx /= along;
+          sz /= along;
+          this.yaw = Math.atan2(-sx, -sz);
+          this.heading = this.yaw;
+          this.speed *= Math.max(RIM_KEEP, 1 - radial);
+        } else {
+          this.speed *= RIM_STOP;
+        }
+      }
     }
 
     this.updatePlunge(dt);
@@ -1082,6 +1100,7 @@ export class Game {
       return;
     }
     exit.next = section;
+    section.group.visible = false;
     this.scene.add(section.group);
     this.sections.push(section);
   }
@@ -1113,7 +1132,9 @@ export class Game {
     const next = exit.next;
     if (!next) return;
     const prev = this.current;
+    prev.hideMouth(exit.index);
     this.current = next;
+    next.group.visible = true;
     this.mode = "slide";
     this.dist = 2.2;
     this.speed = Math.max(11, Math.abs(this.speed) + 6);
