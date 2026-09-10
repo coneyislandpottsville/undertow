@@ -80,12 +80,14 @@ const RIPPLE_TILE = 2;
 const WALL_TILE = 5;
 const WALL_WRAP = 2;
 const WALL_RELIEF = 0.55;
-const BASIN_NEAR: Tile = [2.3, 43];
-const BASIN_MID: Tile = [5.9, 17];
-const BASIN_WIDE: Tile = [20, 5];
-const CAUSTIC_NEAR: Tile = [2.1, 47];
-const CAUSTIC_WIDE: Tile = [3.4, 29];
+const BASIN_NEAR: Tile = [3.2, 31];
+const BASIN_MID: Tile = [9.5, 11];
+const BASIN_WIDE: Tile = [34, 3];
+const CAUSTIC_NEAR: Tile = [3.6, 27];
+const CAUSTIC_WIDE: Tile = [7.4, 13];
 const REFLECT_BEND = 5;
+const BASIN_DETAIL_NEAR = 5;
+const BASIN_DETAIL_FAR = 22;
 
 const flows = new WeakMap<THREE.Material, { value: number }>();
 const uClock = uniform(0);
@@ -372,7 +374,11 @@ export function createSheetMaterial(
     ),
   ).g;
   const froth = sheetField.sample(fieldAt).z.mul(uPlough.w);
-  const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.2), froth)
+  const wash = smoothstep(0.02, 0.42, froth);
+  const foam = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.7), froth)
+    .mul(0.55)
+    .add(wash.mul(0.45))
+    .mul(wash)
     .add(crest)
     .min(1)
     .mul(sheet.foam)
@@ -511,7 +517,13 @@ export function createBasinMaterial(
     .add(erosion.mul(pool.erosion))
     .add(grain.mul(pool.grain))
     .div(weights);
-  const tone = smoothstep(0.28, 0.74, relief.add(grain.mul(pool.grain / weights)));
+  const close = smoothstep(BASIN_DETAIL_FAR, BASIN_DETAIL_NEAR, length(cameraPosition.sub(p)));
+  const shape = strata
+    .mul(pool.strata)
+    .add(erosion.mul(pool.erosion))
+    .add(grain.mul(pool.grain).mul(close))
+    .div(weights);
+  const tone = smoothstep(0.27, 0.75, relief.add(grain.mul(pool.grain / weights)));
 
   const rock = mix(color(theme.wall), color(theme.stripe), tone).mul(mix(1.1, 3.4, tone));
   const soaked = rock.mul(0.55).add(color(theme.water).mul(pool.wetTint * 0.3));
@@ -540,7 +552,7 @@ export function createBasinMaterial(
     side: surface === "wall" ? THREE.BackSide : THREE.DoubleSide,
   });
   mat.colorNode = mix(rock, soaked, wet).mul(fade).mul(shade).add(color(theme.ring).mul(line));
-  mat.normalNode = bumpNormal(relief, flat ? 0.9 : 2.2);
+  mat.normalNode = bumpNormal(shape, flat ? 0.9 : 2.2);
   mat.roughnessNode = mix(
     float(flat ? pool.floorRough : pool.wallRough),
     float(flat ? pool.floorRough * 0.4 : pool.wallRough * 0.25),

@@ -70,6 +70,8 @@ const SPLASH_DROPS = 14;
 const SPLASH_SALT = 0x5314;
 const WAKE_BUBBLES = 1400;
 const BUILD_BUDGET = 3;
+const BOW_WIDTH = 2.2;
+const BOW_THROW = 1.6;
 
 function makeFrame() {
   return {
@@ -85,6 +87,7 @@ const _frame = makeFrame();
 const _sheet = new THREE.Vector3();
 const _ahead = makeFrame();
 const _up = new THREE.Vector3(0, 1, 0);
+const _down = new THREE.Vector3(0, -1, 0);
 const _look = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
@@ -1323,18 +1326,15 @@ export class Game {
     }
     if (this.splashPlan.length) {
       this.splashClock += dt;
-      const waterY = this.current.pool.waterY;
+      const energy = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
       while (this.splashPlan.length && this.splashPlan[0]!.at <= this.splashClock) {
         const e = this.splashPlan.shift()!;
         surface.impulse(e.x, e.z, e.radius, e.amplitude, e.shape);
         if (e.sound) this.audio.splashPart(e.sound, e.pitch);
-        if (e.spray === "crown") {
-          _tmp.set(e.x, waterY + 0.2, e.z);
-          this.spray?.splash(_tmp, 1, e.radius);
-        } else if (e.spray === "column") {
-          _tmp.set(e.x, waterY + 0.1, e.z);
-          this.spray?.column(_tmp, 0.4, e.radius);
-        }
+        if (!e.spray) continue;
+        _tmp.set(e.x, surface.waterLineAt(e.x, e.z, energy), e.z);
+        if (e.spray === "crown") this.spray?.splash(_tmp, 1, e.radius);
+        else this.spray?.column(_tmp, 0.4, e.radius);
       }
     }
     surface.update(
@@ -1439,6 +1439,19 @@ export class Game {
     this.camera.position.y += bob;
   }
 
+  private setBowWave(spray: Spray) {
+    const surface = this.poolSurface;
+    if (!surface || this.submerged > 0.5) {
+      spray.stopTube();
+      return;
+    }
+    if (this.mode === "whirl") _fwd.set(Math.cos(this.whirlAngle), 0, -Math.sin(this.whirlAngle));
+    else _fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const e = THREE.MathUtils.clamp(this.whirlEnergy, 0, 1);
+    _tmp.set(this.px, surface.waterLineAt(this.px, this.pz, e), this.pz);
+    _flumeBank.crossVectors(_fwd, _up).normalize();
+    spray.setTubeEmitter(_tmp, _fwd, _down, _flumeBank, this.speed * BOW_THROW, BOW_WIDTH);
+  }
   private updateSpray(dt: number) {
     const spray = this.spray;
     if (!spray) return;
@@ -1459,6 +1472,8 @@ export class Game {
         this.speed,
         Math.sqrt(2 * radius * depth),
       );
+    } else if (this.mode === "whirl" || this.mode === "paddle") {
+      this.setBowWave(spray);
     } else {
       spray.stopTube();
     }

@@ -30,7 +30,9 @@ import type { Theme } from "./theme";
 const MAX_LIFE = 1.4;
 const RATE = 260;
 const SPEED_FLOOR = 11;
-const BURST = 900;
+const LIFT_PER_SPEED = 0.12;
+const BURST = 2600;
+const CROWN_STAND = 1.7;
 const MIST = 48;
 const MIST_LIFE = 3.2;
 const BUBBLE_RISE = 5.4;
@@ -136,9 +138,10 @@ export function createSpray(
           const ang = r1.mul(Math.PI * 2);
           const rad = uSpread.mul(r3.mul(0.35).add(0.75));
           const out = rad.mul(2.1).add(1.2);
+          const standing = r2.mul(r2).mul(uSpread).mul(CROWN_STAND);
           s.assign(
             vec4(
-              uOrigin.add(vec3(cos(ang).mul(rad), r2.mul(0.3), sin(ang).mul(rad))),
+              uOrigin.add(vec3(cos(ang).mul(rad), standing, sin(ang).mul(rad))),
               r2.mul(0.7).add(0.8),
             ),
           );
@@ -151,7 +154,7 @@ export function createSpray(
             .add(uBinormal.mul(across.mul(uSpread)));
           s.assign(vec4(p, r3.mul(0.5).add(0.35)));
           const along = uSpeed.mul(r1.mul(0.2).add(0.45));
-          const lift = r2.mul(2.2).add(1.2);
+          const lift = uSpeed.mul(LIFT_PER_SPEED).add(1.2).mul(r2.mul(0.8).add(0.6));
           const drift = across.mul(r3.mul(2.4).add(1.6)).add(r1.sub(0.5).mul(0.8));
           m.assign(
             vec4(uTangent.mul(along).sub(uRadial.mul(lift)).add(uBinormal.mul(drift)), 0),
@@ -290,6 +293,8 @@ export function createSpray(
   let burst = 0;
   let burstKind = 1;
   let burstSpread = 1.6;
+  const burstAt = new THREE.Vector3();
+  let bubbleTurn = false;
   let bubbleWanted = 0;
   const bubbleAt = new THREE.Vector3();
   let bubbleSpread = 1;
@@ -328,7 +333,7 @@ export function createSpray(
       burst = Math.round(BURST * strength);
       burstKind = 1;
       burstSpread = radius;
-      uOrigin.value.copy(position);
+      burstAt.copy(position);
       mistLife = MIST_LIFE * strength;
       uMist.value.set(position.x, position.y, position.z, 1);
     },
@@ -336,7 +341,7 @@ export function createSpray(
       burst = Math.round(BURST * strength);
       burstKind = 3;
       burstSpread = radius;
-      uOrigin.value.copy(position);
+      burstAt.copy(position);
     },
     update(dt, riderLight) {
       frame++;
@@ -349,26 +354,28 @@ export function createSpray(
       uMist.value.w = fade * fade;
       mist.visible = fade > 0.01;
 
+      if (tubeOn) carry += (tubeSpeed - SPEED_FLOOR) * RATE * uDt.value;
+      else carry = 0;
+      const wantSheet = carry >= 1;
+      const wantBubbles = bubbleWanted > 0;
+      bubbleTurn = wantBubbles && wantSheet ? !bubbleTurn : wantBubbles;
       let count = 0;
       if (burst > 0) {
         count = Math.min(burst, N);
         burst = 0;
-        carry = 0;
         uKind.value = burstKind;
+        uOrigin.value.copy(burstAt);
         uSpread.value = burstSpread;
-      } else if (bubbleWanted > 0) {
+      } else if (bubbleTurn) {
         count = Math.min(bubbleWanted, N);
         uKind.value = 2;
         uOrigin.value.copy(bubbleAt);
         uSpread.value = bubbleSpread;
-      } else if (tubeOn) {
-        carry += (tubeSpeed - SPEED_FLOOR) * RATE * uDt.value;
+      } else if (wantSheet) {
         count = Math.min(Math.floor(carry), N);
         carry -= count;
         uKind.value = 0;
         uSpread.value = tubeSpread;
-      } else {
-        carry = 0;
       }
       bubbleWanted = 0;
       uCursor.value = cursor;

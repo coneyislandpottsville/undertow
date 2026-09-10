@@ -60,6 +60,7 @@ const SIGMA_MAX = 0.54;
 const FIELD_CLAMP = 1.2;
 const RISE_MAX = 10;
 const MIRROR = 128;
+const MIRROR_SMEAR = 0.42;
 const STEP = 1 / 60;
 const CELL = (PLANE_HALF * 2) / FIELD;
 const WAVE_SPEED = Math.min(Math.sqrt(GRAVITY * BASIN_DEPTH), (CELL / STEP) * Math.sqrt(0.375));
@@ -93,7 +94,10 @@ const BREAK_HIGH = Math.tan(Math.PI / 6);
 const FOAM_BREAK = 2.2;
 const FOAM_SPLASH = 1200;
 const FOAM_DECAY = Math.exp(-STEP / FOAM_LIFE);
-const FOAM_MAX = 0.85;
+const FOAM_MAX = 0.9;
+const FOAM_ONSET = 0.02;
+const FOAM_FULL = 0.42;
+const FOAM_WASH = 0.45;
 const FIELD_PRIME = 150;
 const FIELD_CATCHUP = 8;
 const VORTEX_V = 5.5;
@@ -410,8 +414,10 @@ export function createPoolSurface(
   const coarse = bubbles.r.mul(2).sub(1);
   const fine = closer.g.mul(2).sub(1);
   const grain = coarse.mul(1.1).add(fine.mul(0.7)).mul(0.5).add(0.5).clamp(0, 1);
-  const foam = smoothstep(grain.mul(0.9), grain.mul(0.9).add(0.2), coverage).mul(FOAM_MAX);
-  const foamColor = uFoam.mul(fine.mul(0.5).add(0.75));
+  const wash = smoothstep(FOAM_ONSET, FOAM_FULL, coverage);
+  const speckle = smoothstep(grain.mul(0.85), grain.mul(0.85).add(0.7), coverage);
+  const foam = wash.mul(FOAM_WASH).add(speckle.mul(1 - FOAM_WASH)).mul(wash).mul(FOAM_MAX);
+  const foamColor = uFoam.mul(fine.mul(0.35).add(0.8)).mul(wash.mul(0.35).add(0.65));
 
   const throatAmount = smoothstep(1.6, 0.0, rho.div(sigma)).mul(uEnergy);
   const waterTint = mix(uWater, uThroat, throatAmount);
@@ -432,7 +438,8 @@ export function createPoolSurface(
   let warm: PoolSurface["warm"] = async () => {};
   if (options.reflect > 0) {
     const mirror = reflector({ resolutionScale: options.reflect, bounces: false });
-    mirror.uvNode = mirror.uvNode!.add(distortion);
+    const smear = length(cameraPosition.sub(positionWorld)).mul(MIRROR_SMEAR).add(1);
+    mirror.uvNode = mirror.uvNode!.add(distortion.mul(smear));
     mirrorTarget = mirror.target;
     reflection = mirror.rgb;
     const virtual = mirror.reflector.getVirtualCamera(camera);
@@ -665,9 +672,6 @@ export function createPoolSurface(
       mesh.visible = dx * dx + dz * dz < reach * reach;
       uEnergy.value = nextEnergy;
       uTime.value = elapsed;
-      if (mirrorTarget) {
-        mirrorTarget.position.z = funnelHeight(Math.hypot(dx, dz), nextEnergy);
-      }
       uImpulse.value.w = 0;
       for (let i = 0; i < Math.min(priming, FIELD_CATCHUP); i++) stepField();
       priming = Math.max(0, priming - FIELD_CATCHUP);
