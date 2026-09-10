@@ -13,6 +13,7 @@ import {
   fract,
   length,
   materialEmissive,
+  max,
   mix,
   modelNormalMatrix,
   modelWorldMatrix,
@@ -470,13 +471,16 @@ function glowFalloff(far = GLOW_FAR, floor = GLOW_FLOOR): Node<"float"> {
 }
 
 function bumpNormal(height: Node<"float">, scale: number): Node<"vec3"> {
-  const sigmaX = positionView.dFdx().normalize();
-  const sigmaY = positionView.dFdy().normalize();
+  const dx = positionView.dFdx();
+  const dy = positionView.dFdy();
+  const sigmaX = dx.div(length(dx).max(1e-5));
+  const sigmaY = dy.div(length(dy).max(1e-5));
   const r1 = sigmaY.cross(normalView);
   const r2 = normalView.cross(sigmaX);
   const det = sigmaX.dot(r1).mul(faceDirection);
   const grad = det.sign().mul(height.dFdx().mul(r1).add(height.dFdy().mul(r2)).mul(scale));
-  return det.abs().mul(normalView).sub(grad).normalize();
+  const bumped = det.abs().mul(normalView).sub(grad);
+  return mix(normalView, bumped.div(length(bumped).max(1e-5)), smoothstep(1e-4, 1e-3, det.abs()));
 }
 
 export type BasinSurface = "wall" | "floor" | "rim";
@@ -486,6 +490,7 @@ export function createBasinMaterial(
   waterY: number,
   rim: number,
   surface: BasinSurface,
+  holes: THREE.Vector4[] = [],
 ): THREE.MeshStandardNodeMaterial {
   const pool = theme.pool;
   const flat = surface === "floor";
@@ -510,7 +515,7 @@ export function createBasinMaterial(
 
   const strata = flat
     ? float(0.5)
-    : sin(p.y.mul(pool.bands).add(warp.mul(1.7))).mul(0.5).add(0.5);
+    : sin(p.y.mul(pool.bands).add(warp.mul(1.7))).mul(0.22).add(0.5);
   const weights = pool.strata + pool.erosion + pool.grain;
   const relief = strata
     .mul(pool.strata)
@@ -525,7 +530,9 @@ export function createBasinMaterial(
     .div(weights);
   const tone = smoothstep(0.27, 0.75, relief.add(grain.mul(pool.grain / weights)));
 
-  const rock = mix(color(theme.wall), color(theme.stripe), tone).mul(mix(1.1, 3.4, tone));
+  const rock = mix(color(theme.wall), color(theme.stripe), tone.mul(0.55)).mul(
+    mix(0.82, 1.35, tone),
+  );
   const soaked = rock.mul(0.55).add(color(theme.water).mul(pool.wetTint * 0.3));
   const line = smoothstep(0.2, 0, abs(depth)).mul(pool.line);
 
@@ -563,6 +570,16 @@ export function createBasinMaterial(
     .mul(fade)
     .add(color(theme.water).mul(bounce))
     .add(color(theme.ring).mul(caustic));
+  if (surface === "wall" && holes.length) {
+    let open: Node<"float"> = float(0);
+    for (const hole of holes) {
+      const u = uniform(hole);
+      const d = length(positionLocal.sub(vec3(u.x, u.y, u.z)));
+      open = max(open, smoothstep(u.w.add(0.5), u.w.sub(0.12), d));
+    }
+    mat.opacityNode = open.oneMinus();
+    mat.alphaTest = 0.5;
+  }
   return mat;
 }
 

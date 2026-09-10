@@ -241,6 +241,7 @@ export class Game {
   private released = false;
   private clicked = false;
   private worldWarm = false;
+  private snapCam = false;
   private readonly onResize = () => this.resize();
   private readonly onFs = () => this.syncFs();
   private readonly onPointerDown = () => this.focus();
@@ -694,7 +695,9 @@ export class Game {
 
     if (_frame.tangent.y > 0.55 && this.speed > 22) this.trauma = Math.max(this.trauma, 0.22);
 
-    if (this.dist >= path.length - 1.4) {
+    const pool = this.current.pool;
+    const toPool = Math.hypot(_frame.position.x - pool.center.x, _frame.position.z - pool.center.z);
+    if (this.dist >= path.length - 1.4 || toPool < pool.radius - path.radius) {
       this.enterWhirl();
     }
   }
@@ -727,6 +730,14 @@ export class Game {
   private updatePlunge(dt: number) {
     this.plungeVel += (-PLUNGE_K * this.plunge - PLUNGE_C * this.plungeVel) * dt;
     this.plunge += this.plungeVel * dt;
+    this.plunge = THREE.MathUtils.clamp(this.plunge, -0.7, PLUNGE_MAX);
+  }
+
+  private seatInPool() {
+    const pool = this.current.pool;
+    const maxY = pool.waterY + 2.1;
+    if (this.py > maxY) this.py = maxY;
+    this.eye.set(this.px, Math.min(this.py + 0.58, maxY), this.pz);
   }
 
   private updateBob(dt: number) {
@@ -779,12 +790,15 @@ export class Game {
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
     this.whirlAngle = Math.atan2(dx, dz);
-    this.whirlR = THREE.MathUtils.clamp(Math.hypot(dx, dz), 4.5, pool.radius - 2.4);
+    const outerR = pool.radius - this.current.path.radius - 1.3;
+    this.whirlR = THREE.MathUtils.clamp(Math.min(Math.hypot(dx, dz), pool.radius * 0.42), 5, outerR);
     this.whirlEnergy = 1;
     this.bank = 0;
     this.bankVel = 0;
     this.lift = 0;
     this.sink = 0;
+    this.tiltX = 0;
+    this.tiltZ = 0;
     this.trauma = Math.max(this.trauma, 0.55);
     this.speed = Math.max(this.speed * 0.45, 8);
     this.whirlWall = performance.now();
@@ -796,6 +810,11 @@ export class Game {
       PLUNGE_MAX,
     );
     this.bubbleTime = PLUME_TIME;
+    this.py = pool.waterY + 0.55;
+    this.seatInPool();
+    this.snapCam = true;
+    this.current.hideFlume();
+    this.lamps.attach(this.current);
     useHud.getState().patch({
       mode: "whirl",
       hint: "Whirlpool · A lean in: tighter, faster, over sooner · D lean out: ride it wide · W at the rim: paddle out",
@@ -806,7 +825,7 @@ export class Game {
   private updateWhirl(dt: number) {
     const pool = this.current.pool;
     const steer = this.input.getSteer();
-    const outerR = pool.radius - 2.4;
+    const outerR = pool.radius - this.current.path.radius - 1.3;
     const tight = THREE.MathUtils.clamp((outerR - this.whirlR) / (outerR - WHIRL_INNER), 0, 1);
     this.whirlEnergy -= (dt / WHIRL_TIME) * (1 + tight * 1.5);
     if (performance.now() - this.whirlWall > 11000) this.whirlEnergy = -1;
@@ -831,7 +850,7 @@ export class Game {
       0.55 -
       dip -
       this.plunge;
-    this.eye.set(this.px, this.py + 0.62, this.pz);
+    this.seatInPool();
     this.heading = Math.atan2(-Math.cos(this.whirlAngle), Math.sin(this.whirlAngle));
     this.yaw = this.heading;
     this.speed = spin * this.whirlR;
@@ -896,6 +915,11 @@ export class Game {
     this.mode = "paddle";
     this.swirl = 1.2 + spin * 0.9;
     this.speed = THREE.MathUtils.clamp(this.speed * 0.5, 2, 6);
+    this.plunge = Math.max(this.plunge, 0);
+    this.tiltX = 0;
+    this.tiltZ = 0;
+    this.seatInPool();
+    this.snapCam = true;
     useHud.getState().patch({
       mode: "paddle",
       hint: "Paddle to a glowing exit · W/S move · A/D turn",
@@ -941,7 +965,7 @@ export class Game {
     const dx = this.px - pool.center.x;
     const dz = this.pz - pool.center.z;
     const r = Math.hypot(dx, dz);
-    const maxR = pool.radius - 1.25;
+    const maxR = pool.radius - this.current.path.radius - 0.35;
     const toExit = near ? Math.hypot(this.px - near.position.x, this.pz - near.position.z) : 99;
     if (near && toExit < 6.8) {
       const dirx = (near.position.x - this.px) / toExit;
@@ -992,7 +1016,7 @@ export class Game {
       this.bob +
       0.55 -
       this.plunge;
-    this.eye.set(this.px, this.py + 0.58, this.pz);
+    this.seatInPool();
   }
 
   private poolRadius() {
@@ -1061,24 +1085,7 @@ export class Game {
       return;
     }
     if (!job.warms) {
-      const post = this.post;
-      const surface = this.poolSurface;
-      const warms: (() => Promise<unknown>)[] = [];
-      (job.section ? job.section.group : this.scene).traverse((mesh) => {
-        if (!(mesh as Partial<THREE.Mesh>).material) return;
-        const onScreen = job.section === null && !mesh.frustumCulled;
-        for (const side of onScreen ? [null] : drawnSides(mesh)) {
-          warms.push(() =>
-            atSide(mesh, side, () =>
-              post
-                ? post.warm(mesh, this.passDepth)
-                : this.renderer.compileAsync(mesh, this.camera, this.scene),
-            ),
-          );
-          if (surface) warms.push(() => atSide(mesh, side, () => surface.warm(mesh, this.passDepth)));
-        }
-      });
-      job.warms = warms;
+      this.fillWarms(job);
       return;
     }
     const warm = job.warms.shift();
@@ -1095,43 +1102,84 @@ export class Game {
       });
   }
 
+  private stage(section: RideSection) {
+    if (section.group.parent) return;
+    section.group.visible = false;
+    this.scene.add(section.group);
+  }
+
   private adopt(exit: RideSection["exits"][number] | null, section: RideSection | null) {
     if (!section) this.worldWarm = true;
     if (!exit || !section || exit.next === section) return;
     if (this.disposed || exit.next) {
-      section.dispose();
+      if (exit.next !== section) section.dispose();
       return;
     }
     exit.next = section;
-    section.group.visible = false;
-    this.scene.add(section.group);
-    this.sections.push(section);
+    this.stage(section);
+    if (!this.sections.includes(section)) this.sections.push(section);
+  }
+
+  private fillWarms(job: Game["builds"][number]) {
+    const post = this.post;
+    const surface = this.poolSurface;
+    const warms: (() => Promise<unknown>)[] = [];
+    (job.section ? job.section.group : this.scene).traverse((mesh) => {
+      if (!(mesh as Partial<THREE.Mesh>).material) return;
+      const onScreen = job.section === null && !mesh.frustumCulled;
+      for (const side of onScreen ? [null] : drawnSides(mesh)) {
+        warms.push(() =>
+          atSide(mesh, side, () =>
+            post
+              ? post.warm(mesh, this.passDepth)
+              : this.renderer.compileAsync(mesh, this.camera, this.scene),
+          ),
+        );
+        if (surface) warms.push(() => atSide(mesh, side, () => surface.warm(mesh, this.passDepth)));
+      }
+    });
+    job.warms = warms;
+  }
+
+  private kickBuild(exit: RideSection["exits"][number]) {
+    if (exit.next) return;
+    if (!this.builds.some((b) => b.exit === exit)) this.queueExit(exit);
+    const job = this.builds.find((b) => b.exit === exit);
+    if (!job) return;
+    if (job.steps) {
+      let step = job.steps.next();
+      while (!step.done) step = job.steps.next();
+      job.section = step.value;
+      job.steps = null;
+    }
+    if (!job.section) return;
+    this.stage(job.section);
+    if (!job.warms) this.fillWarms(job);
+    if (job.warms && job.warms.length && !job.warming) {
+      const left = job.warms.splice(0);
+      job.warming = true;
+      void Promise.all(left.map((w) => w().catch(() => undefined))).then(() => {
+        job.warming = false;
+        if (!this.disposed && !exit.next) this.adopt(exit, job.section);
+        const i = this.builds.indexOf(job);
+        if (i >= 0) this.builds.splice(i, 1);
+      });
+    } else if (!job.warming && job.warms && job.warms.length === 0) {
+      this.adopt(exit, job.section);
+      const i = this.builds.indexOf(job);
+      if (i >= 0) this.builds.splice(i, 1);
+    }
   }
 
   private generateExit(exit: RideSection["exits"][number]) {
-    if (exit.next) return;
-    const job = this.builds.find((b) => b.exit === exit);
-    if (job) {
-      if (job.steps) {
-        let step = job.steps.next();
-        while (!step.done) step = job.steps.next();
-        job.section = step.value;
-        job.steps = null;
-      }
-      this.adopt(exit, job.section!);
-      return;
-    }
-    const seed = exitSeed(this.current.seed, exit.index);
-    const start = exit.position.clone();
-    const outward = new THREE.Vector3(Math.sin(exit.angle), 0, Math.cos(exit.angle));
-    start.addScaledVector(outward, -0.4);
-    this.adopt(exit, generateSection(seed, start, exit.tangent, exit.theme, false, [
-      this.current.pool,
-    ]));
+    this.kickBuild(exit);
   }
 
   private enterExit(exit: RideSection["exits"][number]) {
-    if (!exit.next) this.generateExit(exit);
+    if (!exit.next) {
+      this.kickBuild(exit);
+      if (!exit.next) return;
+    }
     const next = exit.next;
     if (!next) return;
     const prev = this.current;
@@ -1157,7 +1205,8 @@ export class Game {
     this.sheetSlope = 0;
     this.poolSurface?.attach(next);
     this.sheetField?.attach(next);
-    this.lamps.attach(next);
+    this.lamps.attach(prev);
+    this.snapCam = true;
     for (let i = this.builds.length - 1; i >= 0; i--) {
       const job = this.builds[i]!;
       if (job.section === next || job.warming) continue;
@@ -1348,7 +1397,8 @@ export class Game {
   private updateCamera(dt: number) {
     if (this.mode === "slide") {
       const path = this.current.path;
-      samplePath(path, Math.min(this.dist + LOOK_AHEAD, path.length), _ahead);
+      const lookDist = LOOK_AHEAD / (1 + _frame.curvature.length() * 10);
+      samplePath(path, Math.min(this.dist + lookDist, path.length), _ahead);
       _look.copy(_ahead.position).sub(this.eye);
       if (_look.lengthSq() > 1e-4) _look.normalize();
       else _look.copy(_frame.tangent);
@@ -1388,11 +1438,11 @@ export class Game {
         );
         if (_look.lengthSq() > 0.001) {
           _look.normalize();
-          _fwd.lerp(_look, 0.16 + 0.2 * e).normalize();
+          _fwd.lerp(_look, 0.08 + 0.1 * e).normalize();
         }
-        _fwd.y -= 0.02;
+        _fwd.y -= 0.22;
       }
-      _fwd.y = this.mode === "paddle" ? -0.04 : _fwd.y;
+      _fwd.y = this.mode === "paddle" ? -0.26 : _fwd.y;
       if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
       _fwd.normalize();
 
@@ -1425,8 +1475,12 @@ export class Game {
 
     const posLambda = this.mode === "slide" ? 22 : 14;
     const rotLambda = this.mode === "whirl" ? 7 : this.mode === "slide" ? 13 : 10;
-    this.camera.position.lerp(this.eye, 1 - Math.exp(-posLambda * dt));
-    this.camera.quaternion.slerp(_qTarget, 1 - Math.exp(-rotLambda * dt));
+    const snap = this.snapCam;
+    this.snapCam = false;
+    const posT = snap ? 1 : 1 - Math.exp(-posLambda * dt);
+    const rotT = snap ? 1 : 1 - Math.exp(-rotLambda * dt);
+    this.camera.position.lerp(this.eye, posT);
+    this.camera.quaternion.slerp(_qTarget, rotT);
 
     if (this.trauma > 0.01 && !this.reducedMotion) {
       const shake = this.trauma * this.trauma;
@@ -1437,6 +1491,10 @@ export class Game {
 
     const bob = this.reducedMotion ? 0 : Math.sin(this.clock.elapsed * (6 + this.speed * 0.12)) * 0.012 * (this.speed / 20);
     this.camera.position.y += bob;
+    if (this.mode !== "slide") {
+      const cap = this.current.pool.waterY + 2.2;
+      if (this.camera.position.y > cap) this.camera.position.y = cap;
+    }
   }
 
   private setBowWave(spray: Spray) {
